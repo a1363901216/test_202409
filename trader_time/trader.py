@@ -284,32 +284,42 @@ def get_buy_info(stock_all):
     print(results)
     return results
 
-def convert_dict_to_time_index(stock_dict):
+def convert_to_date_dict(stock_dict):
     now = time.time()
     stock_list = []
     for _, value in stock_dict.items():
         stock_list.append(value)
     df = pd.concat(stock_list)
-    # df['trade_date'] = df['trade_date'].astype(int)
-    df.set_index(['trade_date'], inplace=True, drop=False)
+    df['trade_date'] = df['trade_date'].astype(int)
+    df = df.set_index(['trade_date'], drop=True)
+    print('convert_dict_to_time_index1 cost', time.time() - now)
     now = time.time()
-    df.sort_index(inplace=True)
+    df = df.sort_index()
+    key_2_groups = df.groupby("trade_date")
+    date_dict = {}
+    for key, groups in key_2_groups:
+        date_dict[key] = groups
     print('convert_dict_to_time_index cost', time.time() - now)
-    return df
+    return date_dict
 
 if __name__ == '__main__':
     # os.environ['NUMBA_NUM_THREADS'] = '16'
     # 获取原始数据
     print("start ...")
-    oir_stock_dict, shangzheng = get_ori_data.load(isTest=False, reload_from_clickhouse=True)
+    oir_stock_dict, shangzheng = get_ori_data.load(isTest=True, reload_from_clickhouse=True)
 
     #获取每个股票的买点、卖点
     stock_dict_with_signal = get_ma_signal.get_signal(oir_stock_dict)
 
     #以时间维度，计算每天收益
-    stocks_df_by_time = convert_dict_to_time_index(stock_dict_with_signal)
+    date_dict = convert_to_date_dict(stock_dict_with_signal)
+    myOwnBroker = MyOwnBroker(date_dict, shangzheng)
     #打印股票收益曲线
-
+    while myOwnBroker.next():
+        # print(myOwnBroker.cur_date())
+        pass
+    myOwnBroker.checkout()
+    myOwnBroker.plot_money()
     print("end ...")
     # sell_signal = get_signal.sell_signal(all=stock_all, date='20170103', hold_stock_codes=['000008.SZ', '000001.SZ'])
 

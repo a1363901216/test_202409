@@ -17,20 +17,12 @@ def generate_tick_positions(data_length):
 def normalization(data):
     init_value = data['y'][0]
     np_array = np.array(data["y"])
-    data["y"] = ((np_array - init_value) * 1.0 /init_value).tolist()
+    data["y"] = ((np_array - init_value) * 100.0 /init_value).tolist()
     return data
 def do_plot(data, shangzheng):
-
-
-
-    # data = {
-    #     'x': pd.date_range(start='2017-01-01', periods=size),
-    #     'y': [round(100 + 20 * (i / size) + 5 * np.random.rand(), 2) for i in range(size)]
-    # }
-    # data['x'] = [int(v) for v in data['x']]
+    data['x'] = [str(item) for item in data['x']]
     data = normalization(data)
     data['y_f'] = ['{:.3f}'.format(val) for val in data['y']]  # 控制小数点后有6位
-    source = ColumnDataSource(data=dict(x=data['x'], y=data['y'], y_f=data['y_f']))
 
     shangzheng_dict={}
     shangzheng_dict['x'] = [row['cal_date']  for index, row in shangzheng.iterrows()]
@@ -38,14 +30,14 @@ def do_plot(data, shangzheng):
     shangzheng_dict = normalization(shangzheng_dict)
     shangzheng_dict['y_f'] = ['{:.3f}'.format(val) for val in shangzheng_dict['y']]
 
-    # 控制小数点后有6位
-    source_shangzheng = ColumnDataSource(data=dict(x=shangzheng_dict['x'], y=shangzheng_dict['y'], y_f=data['y_f']))
+    source = ColumnDataSource(data=dict(x=data['x'], y1=data['y'], y_f1=data['y_f'], y2=shangzheng_dict['y'], y_f2=shangzheng_dict['y_f']))
+
     # 创建Figure对象
     # p = figure(x_axis_label='x', y_axis_label='y', title='Stock Price Over Time', tools='', width=1400)
     p = figure(x_range=data['x'], y_axis_label='y', title='Stock Price Over Time', tools='', width=1400)
-    p.line('x', 'y', source=source, color="red", legend_label='收益', line_width=2)
+    p.line('x', 'y1', source=source, color="red", legend_label='收益', line_width=2)
 
-    p.line('x', 'y', source=source_shangzheng, color="blue", legend_label='上证', line_width=2)
+    p.line('x', 'y2', source=source, color="blue", legend_label='上证', line_width=2)
     # p.scatter('Date', 'Close', size=5, source=source2, fill_color="green", line_color=None)
 
     # 添加交互式工具
@@ -55,7 +47,8 @@ def do_plot(data, shangzheng):
             ("索引", "$index"),
             ("x", "@x"),
             # 直接使用已经格式化的y值
-            ("y", "@y_f"),
+            ("y_f1", "@y_f1"),
+            ("y_f2", "@y_f2"),
         ],
         mode='vline'
     )

@@ -92,7 +92,7 @@ def do_reload_from_clickhouse(isTest):
     list = []
     stock_dict = {}
     for i in range(stock_basic.values.shape[0]):
-        if i > 5 and isTest:
+        if i > 1 and isTest:
             break
 
         now = time.time()
@@ -148,6 +148,7 @@ def load(isTest, reload_from_clickhouse):
         stock_all = read_file(filename=file_name)
     print("read_file ", time.time() - now)
     shangzheng = read_file(filename='../data/shangzheng.pkl')
+    # shangzheng['cal_date'] = shangzheng['cal_date'].astype(int)
     return stock_all, shangzheng
 
 
