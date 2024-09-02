@@ -306,10 +306,10 @@ if __name__ == '__main__':
     # os.environ['NUMBA_NUM_THREADS'] = '16'
     # 获取原始数据
     print("start ...")
-    oir_stock_dict, shangzheng = get_ori_data.load(isTest=True, reload_from_clickhouse=True)
+    ori_stock_dict, shangzheng = get_ori_data.load(isTest=True, reload_from_clickhouse=True)
 
     #获取每个股票的买点、卖点
-    stock_dict_with_signal = get_ma_signal.get_signal(oir_stock_dict)
+    stock_dict_with_signal = get_ma_signal.get_signal(ori_stock_dict)
 
     #以时间维度，计算每天收益
     date_dict = convert_to_date_dict(stock_dict_with_signal)
@@ -319,7 +319,7 @@ if __name__ == '__main__':
         # print(myOwnBroker.cur_date())
         pass
     myOwnBroker.checkout()
-    myOwnBroker.plot_money()
+    myOwnBroker.plot_money(ori_stock_dict['000001.SZ'])
     print("end ...")
     # sell_signal = get_signal.sell_signal(all=stock_all, date='20170103', hold_stock_codes=['000008.SZ', '000001.SZ'])
 

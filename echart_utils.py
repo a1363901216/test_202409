@@ -25,8 +25,8 @@ def do_plot(data, shangzheng):
     data['y_f'] = ['{:.3f}'.format(val) for val in data['y']]  # 控制小数点后有6位
 
     shangzheng_dict={}
-    shangzheng_dict['x'] = [row['cal_date']  for index, row in shangzheng.iterrows()]
-    shangzheng_dict['y'] = [row['close']  for index, row in shangzheng.iterrows()]
+    shangzheng_dict['x'] = [row['trade_date']  for index, row in shangzheng.iterrows()]
+    shangzheng_dict['y'] = [row['close_qfq']  for index, row in shangzheng.iterrows()]
     shangzheng_dict = normalization(shangzheng_dict)
     shangzheng_dict['y_f'] = ['{:.3f}'.format(val) for val in shangzheng_dict['y']]
 
@@ -44,11 +44,11 @@ def do_plot(data, shangzheng):
     wheel_zoom_tool = WheelZoomTool()
     hover = HoverTool(
         tooltips=[
-            ("索引", "$index"),
+            # ("索引", "$index"),
             ("x", "@x"),
             # 直接使用已经格式化的y值
-            ("y_f1", "@y_f1"),
-            ("y_f2", "@y_f2"),
+            ("收益", "@y_f1 %"),
+            ("上证", "@y_f2 %"),
         ],
         mode='vline'
     )

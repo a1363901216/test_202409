@@ -60,10 +60,11 @@ def pre_dapan(trade_cal):
 
     merged['can_trade'] = True
     merged = pd.merge(trade_cal, merged, left_on='cal_date', right_on='trade_date', how='left')
-    merged = merged.drop(columns=['trade_date'])
+    merged = merged.drop(columns=['cal_date'])
     merged['can_trade'] = merged['can_trade'].infer_objects(copy=False).fillna(False)
     merged = merged.infer_objects(copy=False).ffill(axis=0).infer_objects(copy=False).bfill(axis=0)
-    merged.set_index(['cal_date'], inplace=True, drop=False)
+    merged['close_qfq'] = merged['close']
+    merged.set_index(['trade_date'], inplace=True, drop=False)
     merged.sort_index(inplace=True)
 
     write_file(filename='../data/shangzheng.pkl', value=merged)

@@ -198,7 +198,8 @@ class MyOwnBroker():
         # print('next2 ', time.time() - now)
         now = time.time()
 
-        buy_fix_price = 100000
+        # buy_fix_price = 100
+        buy_fix_price = self.money
         # 持仓遇到卖信号就卖
         hold_dict_copy = copy.copy(hold_dict)
         for code, value in hold_dict_copy.items():
@@ -241,8 +242,10 @@ class MyOwnBroker():
             self.money = self.money + open_price_each * hold_size
             del self.hold[code]
             self.orders.append(((code, trade_date), (is_sell_cmd, cur_row)))
-            print(f'trade_date {trade_date}, self.money {self.money}, sell {code} {open_price_each * hold_size} '
-                  f'size {buy_size} each {open_price_each}')
+            print('trade_date %s, self.money %.2f, sell %s all %d '
+                  f'size %.2f each %.2f' % (trade_date, self.money, code,
+                                            open_price_each * hold_size, buy_size, open_price_each))
+
         #     todo 调接口实现订单
         else:
             buy_price_all = open_price_each * buy_size
@@ -257,8 +260,9 @@ class MyOwnBroker():
                 'buy_price_all': buy_price_all,
             }
             self.orders.append(((code, trade_date), (is_sell_cmd, cur_row)))
-            print(f'trade_date {trade_date}, self.money {self.money}, buy {code} {buy_price_all} '
-                  f'size {buy_size} each {open_price_each}')
+            print('trade_date %s, self.money %.2f, buy %s all %d '
+                  f'size %.2f each %.2f' % (trade_date, self.money, code,
+                                            buy_price_all, buy_size, open_price_each))
         #     todo 调接口实现订单
 
     def checkout(self):
@@ -267,5 +271,8 @@ class MyOwnBroker():
             self.order_stock(code, 'last', 0.0, None, hold_dict_copy)
         print("final money ", self.money)
 
-    def plot_money(self):
-        do_plot(data=self.money_history, shangzheng=self.shangzheng)
+    def plot_money(self, df):
+        refer = self.shangzheng
+        if df is not  None:
+            refer = refer
+        do_plot(data=self.money_history, shangzheng=refer)
