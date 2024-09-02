@@ -88,6 +88,7 @@ def do_reload_from_clickhouse(isTest):
     # stock_basic = pd.DataFrame(['002122.SZ'], columns=['ts_code'])
     # stock_basic = pd.DataFrame(['600823.SH', '002122.SZ'], columns=['ts_code'])
     # stock_basic = pd.DataFrame(['002122.SZ'], columns=['ts_code'])
+    stock_basic = pd.DataFrame(['000001.SZ'], columns=['ts_code'])
     pre_dapan(trade_cal)
 
     list = []

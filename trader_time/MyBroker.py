@@ -128,8 +128,9 @@ class MyOrder():
 
 
 class MyOwnBroker():
-    def __init__(self, date_dict, shangzheng):
+    def __init__(self, date_dict, date_stock_dict, shangzheng):
         self.shangzheng = shangzheng
+        self.date_stock_dict = date_stock_dict
         self.money = 1000000
         self.min_size = 100
         self.hold = {
@@ -214,14 +215,21 @@ class MyOwnBroker():
                 row = stocks_dict_2_buy[to_buy_code]
                 self.order_stock(to_buy_code, cur_date, buy_fix_price, row, self.hold)
 
-        self.money_history['x'].append(cur_date)
-        self.money_history['y'].append(self.money)
+        self.save_money_history(cur_date)
         # print('next3 ', time.time() - now)
         now = time.time()
 
         self.date_index = self.date_index + 1
         return self.date_index < len(self.trade_date)
 
+    def save_money_history(self, cur_date):
+        hold_money = 0
+        date_stock_dict = self.date_stock_dict
+        for key, value in self.hold.items():
+            hold_money = hold_money + value['buy_size'] * date_stock_dict[key + '_' + str(cur_date)]
+
+        self.money_history['x'].append(cur_date)
+        self.money_history['y'].append(self.money + hold_money)
     def order_stock(self, code, trade_date, buy_price, cur_row, hold_info):
         # 预处理
         is_sell_cmd = True
@@ -274,5 +282,5 @@ class MyOwnBroker():
     def plot_money(self, df):
         refer = self.shangzheng
         if df is not  None:
-            refer = refer
-        do_plot(data=self.money_history, shangzheng=refer)
+            refer = df
+        do_plot(profit=self.money_history, base=refer)

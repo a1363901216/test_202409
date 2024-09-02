@@ -14,30 +14,38 @@ def generate_tick_positions(data_length):
         interval = data_length // 10
         return list(range(0, data_length, interval))[:10]
 
-def normalization(data):
-    init_value = data['y'][0]
-    np_array = np.array(data["y"])
-    data["y"] = ((np_array - init_value) * 100.0 /init_value).tolist()
-    return data
-def do_plot(data, shangzheng):
-    data['x'] = [str(item) for item in data['x']]
-    data = normalization(data)
-    data['y_f'] = ['{:.3f}'.format(val) for val in data['y']]  # 控制小数点后有6位
+def normalization(data, init_value):
+    if init_value==None:
+        init_value = data[0]
+    np_array = np.array(data)
+    return ((np_array - init_value) * 100.0 /init_value).tolist()
 
-    shangzheng_dict={}
-    shangzheng_dict['x'] = [row['trade_date']  for index, row in shangzheng.iterrows()]
-    shangzheng_dict['y'] = [row['close_qfq']  for index, row in shangzheng.iterrows()]
-    shangzheng_dict = normalization(shangzheng_dict)
-    shangzheng_dict['y_f'] = ['{:.3f}'.format(val) for val in shangzheng_dict['y']]
+def do_plot(profit, base):
+    profit['x'] = [str(item) for item in profit['x']]
+    profit['y'] = normalization(profit['y'], profit['y'][0])
+    profit['y_f'] = ['{:.2f}'.format(val) for val in profit['y']]  # 控制小数点后有6位
 
-    source = ColumnDataSource(data=dict(x=data['x'], y1=data['y'], y_f1=data['y_f'], y2=shangzheng_dict['y'], y_f2=shangzheng_dict['y_f']))
+    base_dict={}
+    base_dict['x'] = [str(row['trade_date'])  for index, row in base.iterrows()]
+    base_dict['y'] = [row['close_qfq']  for index, row in base.iterrows()]
+    base_dict['y_ma5'] = [row['ema_qfq_5'] for index, row in base.iterrows()]
+    base_normal = base_dict['y'][0]
+    base_dict['y'] = normalization(base_dict['y'], base_normal)
+    base_dict['y_ma5'] = normalization(base_dict['y_ma5'], base_normal)
+    base_dict['y_f'] = ['{:.2f}'.format(val) for val in base_dict['y']]
+    base_dict['y_ma5_f'] = [row['ema_qfq_5'] for index, row in base.iterrows()]
 
+
+    source = ColumnDataSource(data=dict(x=base_dict['x'], y=base_dict['y'], y_base_f=base_dict['y_f'],
+                                        y_ma5=base_dict['y_ma5'], y_ma5_f=base_dict['y_ma5_f'],
+                                        y_profit=profit['y'], y_profit_f=profit['y_f'],
+                                        ))
     # 创建Figure对象
     # p = figure(x_axis_label='x', y_axis_label='y', title='Stock Price Over Time', tools='', width=1400)
-    p = figure(x_range=data['x'], y_axis_label='y', title='Stock Price Over Time', tools='', width=1400)
-    p.line('x', 'y1', source=source, color="red", legend_label='收益', line_width=2)
-
-    p.line('x', 'y2', source=source, color="blue", legend_label='上证', line_width=2)
+    p = figure(x_range=base_dict['x'], y_axis_label='y', title='Stock Price Over Time', tools='', width=1400)
+    p.line('x', 'y', source=source, color="black", legend_label='base', line_width=2)
+    p.line('x', 'y_ma5', source=source, color="blue", legend_label='ma5', line_width=2)
+    p.line('x', 'y_profit', source=source, color="red", legend_label='收益', line_width=2)
     # p.scatter('Date', 'Close', size=5, source=source2, fill_color="green", line_color=None)
 
     # 添加交互式工具
@@ -47,8 +55,10 @@ def do_plot(data, shangzheng):
             # ("索引", "$index"),
             ("x", "@x"),
             # 直接使用已经格式化的y值
-            ("收益", "@y_f1 %"),
-            ("上证", "@y_f2 %"),
+            ("base", "@y_base_f %"),
+            ("base_ma5", "@y_ma5_f %"),
+            ("收益", "@y_profit_f %"),
+
         ],
         mode='vline'
     )
