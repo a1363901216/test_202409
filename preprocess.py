@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 
 from helper.download_data import write_file
-import clickhouse_util
+from helper import clickhouse_util
 
 start_date = '20170101'
 end_date = '20240630'
@@ -76,7 +76,7 @@ def pre_process():
     clickhouse_util.optimize('fina_indicator')
     clickhouse_util.optimize('namechange')
     clickhouse_util.optimize('stock_basic')
-    clickhouse_util.optimize('suspend_d')---+
+    clickhouse_util.optimize('suspend_d')
     clickhouse_util.optimize('zhishu')
 
     trade_cal = clickhouse_util.from_table('SELECT * FROM trade_cal order by cal_date')
@@ -143,6 +143,48 @@ def pre_process():
 
     print('finish')
 
+def pre_process_weekly():
+    pd.set_option("future.no_silent_downcasting", True)
+    clickhouse_util.optimize('trade_cal')
+    clickhouse_util.optimize('stock_basic')
+    clickhouse_util.optimize('stk_factor_pro')
+    clickhouse_util.optimize('stk_factor')
+    clickhouse_util.optimize('fina_indicator')
+    clickhouse_util.optimize('namechange')
+    clickhouse_util.optimize('stock_basic')
+    clickhouse_util.optimize('suspend_d')
+    clickhouse_util.optimize('zhishu')
+    clickhouse_util.optimize('stk_weekly')
+
+    trade_cal = clickhouse_util.from_table('SELECT * FROM trade_cal order by cal_date')
+    stock_basic = clickhouse_util.from_table('SELECT ts_code FROM stock_basic order by ts_code')
+
+
+    list = []
+    isTest = False
+    for i in range(stock_basic.values.shape[0]):
+        if i >100 and isTest:
+            break
+
+        now = time.time()
+        stock_code = stock_basic.values[i][0]
+        query = (f"SELECT * FROM stk_weekly where ts_code = '{stock_code}' order by ts_code,trade_date")
+        merged = clickhouse_util.from_table(query)
+        if merged.shape[0] == 0:
+            continue
+        # ST
+
+        list.append(merged)
+        print("stock_code", stock_code, len(list), time.time() - now)
+    all = pd.concat(list)
+    if not isTest:
+        write_file(filename='./data/tushare_stock.pkl', value=all)
+    else:
+        write_file(filename='./data/tushare_stock_small.pkl', value=all)
+
+    print('finish')
+
 
 if __name__ == '__main__':
     pre_process()
+    # pre_process_weekly()

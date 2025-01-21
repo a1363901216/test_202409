@@ -1,16 +1,5 @@
 # coding:utf-8
 import copy
-import math
-import time, datetime, traceback, sys
-
-import numpy as np
-
-from echart_utils import do_plot
-from helper.data_helper import *
-
-import pandas
-
-import backtrader as bt
 
 
 class MyOrder():
@@ -105,16 +94,9 @@ class MyOwnBroker():
 
 # coding:utf-8
 import math
-import time, datetime, traceback, sys
 
-import numpy as np
-
-from echart_utils import do_plot
+from old.echart_utils import do_plot
 from helper.data_helper import *
-
-import pandas
-
-import backtrader as bt
 
 
 class MyOrder():

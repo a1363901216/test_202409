@@ -1,17 +1,16 @@
-import copy
 import time
 
 import pandas as pd
 import numpy as np
 
 from helper.download_data import write_file, read_file
-import clickhouse_util
+from helper import clickhouse_util
 
 start_date = '20170101'
-end_date = '20240630'
+end_date = '20250116'
 
-file_name_test = '../data/tushare_stock_dict_only_price_small.pkl'
-file_name = '../data/tushare_stock_dict_only_price.pkl'
+file_name_test = '../../data/tushare_stock_dict_only_price_small.pkl'
+file_name = '../../data/tushare_stock_dict_only_price.pkl'
 
 
 def fill_fina_indicator(df, ref_times):
@@ -66,7 +65,7 @@ def pre_dapan(trade_cal):
     merged.set_index(['cal_date'], inplace=True, drop=False)
     merged.sort_index(inplace=True)
 
-    write_file(filename='../data/shangzheng.pkl', value=merged)
+    write_file(filename='../../data/shangzheng.pkl', value=merged)
 
 
 # @numba.jit(nopython=True)
@@ -146,10 +145,10 @@ def load(isTest, reload_from_clickhouse):
     else:
         stock_all = read_file(filename=file_name)
     print("read_file ", time.time() - now)
-    shangzheng = read_file(filename='../data/shangzheng.pkl')
+    shangzheng = read_file(filename='../../data/shangzheng.pkl')
     return stock_all, shangzheng
 
 
 if __name__ == '__main__':
     # main(isTest = True)
-    load(isTest=True, reload_from_clickhouse=True)
+    load(isTest=False, reload_from_clickhouse=True)

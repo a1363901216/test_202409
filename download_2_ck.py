@@ -4,14 +4,18 @@ import tushare as ts
 from sqlalchemy import create_engine
 import threading
 
-import clickhouse_util
+from helper import clickhouse_util
 
-ts.set_token('0d9223de9a848ebf6f2e268039b1762919bfbcb1826df44246220d4c')
+# pro = ts.pro_api('20241217202523-6dc513df-e2f2-4ab8-8dfd-038be46b739c')
+# pro._DataApi__http_url = 'http://tsapi.majors.ltd:7000'
+# ts.set_token('20241217202523-6dc513df-e2f2-4ab8-8dfd-038be46b739c')
+# ts.set_token('0d9223de9a848ebf6f2e268039b1762919bfbcb1826df44246220d4c')
+ts.set_token('a188f960b9ac36797794b1e2cfc5afa39b82cc15c2d168595a61e7dd')
 
 pro = ts.pro_api()
 
 start_date = '20170101'
-end_date = '20240630'
+end_date = '20250116'
 
 username = 'root'
 password = 'a000'
@@ -105,6 +109,26 @@ def sleep_milliseconds(milliseconds):
     while time.time() < end:
         pass
 
+def get_stk_weekly(start_date, end_date, stock_codes):
+    # for i, _ in enumerate(stock_codes):
+    for i, row in stock_codes.iterrows():
+        stock_code = row['ts_code']
+        for _ in range(3):
+            try:
+                now = time.time()
+
+                df = pro.weekly(ts_code=stock_code, start_date=start_date, end_date=end_date,
+                                fields='ts_code,trade_date,open,high,low,close,pct_chg,vol,amount')
+                df.fillna(value=-1000000, inplace=True)
+                #                       index=False)
+                clickhouse_util.to_table(df, 'stk_weekly')
+                sleep_milliseconds(100)
+                print('stk_factor ok for ', i, time.time() - now)
+                break
+            except Exception as e:
+                time.sleep(1)
+                print('================stk_factor fail===========', stock_code, e)
+
 
 path = './data/'
 if __name__ == '__main__':
@@ -124,7 +148,7 @@ if __name__ == '__main__':
     # clickhouse_util.optimize('stock_basic')
     # # clickhouse_util.optimize('stk_factor_pro')
     # # 股票因子专业
-    # get_stk_factor_pro(trade_cal.values)
+    get_stk_factor_pro(trade_cal.values)
     # get_stk_factor(trade_cal.values)
 
     # 历史名字 st 记录
@@ -183,6 +207,10 @@ if __name__ == '__main__':
     #     clickhouse_util.to_table(index_dailybasic, 'index_dailybasic')
     #     sleep_milliseconds(100)
 
-    shangzheng = pro.index_daily(ts_code='000001.SH', start_date=start_date, end_date=end_date)
-    shangzheng.fillna(value='', inplace=True)
-    clickhouse_util.to_table(shangzheng, 'zhishu')
+    # 周线
+    # stock_basic = pro.stock_basic(exchange='', list_status='L', fields='')
+    # get_stk_weekly(start_date, end_date, stock_basic)
+
+    # shangzheng = pro.index_daily(ts_code='000001.SH', start_date=start_date, end_date=end_date)
+    # shangzheng.fillna(value='', inplace=True)
+    # clickhouse_util.to_table(shangzheng, 'zhishu')

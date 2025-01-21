@@ -1,17 +1,16 @@
-import copy
 import time
 
 import pandas as pd
 import numpy as np
 
 from helper.download_data import write_file, read_file
-import clickhouse_util
+from helper import clickhouse_util, get_ori_data
 
 start_date = '20170101'
 end_date = '20240630'
 
-file_name_test = '../data/tushare_stock_dict_only_price_small.pkl'
-file_name = '../data/tushare_stock_dict_only_price.pkl'
+file_name_test = 'data/tushare_stock_dict_only_price_small.pkl'
+file_name = 'data/tushare_stock_dict_only_price.pkl'
 
 
 def fill_fina_indicator(df, ref_times):
@@ -60,13 +59,14 @@ def pre_dapan(trade_cal):
 
     merged['can_trade'] = True
     merged = pd.merge(trade_cal, merged, left_on='cal_date', right_on='trade_date', how='left')
-    merged = merged.drop(columns=['trade_date'])
+    merged = merged.drop(columns=['cal_date'])
     merged['can_trade'] = merged['can_trade'].infer_objects(copy=False).fillna(False)
     merged = merged.infer_objects(copy=False).ffill(axis=0).infer_objects(copy=False).bfill(axis=0)
-    merged.set_index(['cal_date'], inplace=True, drop=False)
+    merged['close_qfq'] = merged['close']
+    merged.set_index(['trade_date'], inplace=True, drop=False)
     merged.sort_index(inplace=True)
 
-    write_file(filename='../data/shangzheng.pkl', value=merged)
+    write_file(filename='data/shangzheng.pkl', value=merged)
 
 
 # @numba.jit(nopython=True)
@@ -87,12 +87,13 @@ def do_reload_from_clickhouse(isTest):
     # stock_basic = pd.DataFrame(['002122.SZ'], columns=['ts_code'])
     # stock_basic = pd.DataFrame(['600823.SH', '002122.SZ'], columns=['ts_code'])
     # stock_basic = pd.DataFrame(['002122.SZ'], columns=['ts_code'])
+    # stock_basic = pd.DataFrame(['000001.SZ'], columns=['ts_code'])
     pre_dapan(trade_cal)
 
     list = []
     stock_dict = {}
     for i in range(stock_basic.values.shape[0]):
-        if i > 5 and isTest:
+        if i > 1 and isTest:
             break
 
         now = time.time()
@@ -100,7 +101,7 @@ def do_reload_from_clickhouse(isTest):
 
         stock_code = stock_basic.values[i][0]
         query = (f"SELECT ts_code,trade_date,open_qfq,close_qfq,"
-                 f"vol,ema_qfq_5,ema_qfq_10,ema_qfq_20,ema_qfq_30"
+                 f"vol,ema_qfq_5,ema_qfq_10,ema_qfq_20,ema_qfq_30,ema_qfq_60,ema_qfq_250"
                  f" FROM stk_factor_pro where ts_code = '{stock_code}'")
         merged = clickhouse_util.from_table(query)
 
@@ -117,9 +118,10 @@ def do_reload_from_clickhouse(isTest):
         # list.append(merged)
         # stock_dict[stock_code] = merged
         # list.append(merged)
-        merged = merged.drop(columns=['ts_code'])
-        merged = merged.set_index(['trade_date'])
-        merged = merged.sort_index()
+        # merged = merged.drop(columns=['ts_code'])
+        # merged = merged.set_index(['trade_date'])
+        # merged = merged.sort_index()
+        merged['trade_date'] = merged['trade_date'].astype(int)
         stock_dict[stock_code] = merged
         print("stock_code", stock_code, len(stock_dict), time.time() - now)
     # all = pd.concat(list)
@@ -130,7 +132,7 @@ def do_reload_from_clickhouse(isTest):
     else:
         write_file(filename=file_name, value=stock_dict)
 
-    print('finish')
+    # print('finish')
 
 
 def load(isTest, reload_from_clickhouse):
@@ -146,10 +148,12 @@ def load(isTest, reload_from_clickhouse):
     else:
         stock_all = read_file(filename=file_name)
     print("read_file ", time.time() - now)
-    shangzheng = read_file(filename='../data/shangzheng.pkl')
+    shangzheng = read_file(filename='data/shangzheng.pkl')
+    # shangzheng['cal_date'] = shangzheng['cal_date'].astype(int)
     return stock_all, shangzheng
 
 
 if __name__ == '__main__':
     # main(isTest = True)
-    load(isTest=True, reload_from_clickhouse=True)
+    stock_all, shangzheng = get_ori_data.load(isTest=False, reload_from_clickhouse=True)
+
