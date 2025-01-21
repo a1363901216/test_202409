@@ -18,7 +18,7 @@ clickhouse_driver 是通过TCP链接，端口号是9000
 DB = 'stock'
 # settings = {'max_threads': 5}
 client = Client(database=f'{DB}',
-                host='127.0.0.1',
+                host='localhost',
                 port='9000',
                 user='default',
                 password='',

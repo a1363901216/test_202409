@@ -1,11 +1,13 @@
+import copy
 import pickle
 import time
 
 import pandas as pd
 import numpy as np
 import redis
+import talib
 
-from helper.consts import redis_key_a_base, redis_key_a_ext, redis_key_a_ref
+from helper.consts import redis_key_a_base, redis_key_a_ext
 from helper.download_data import write_file, read_file
 from helper import clickhouse_util, consts
 
@@ -73,6 +75,17 @@ def pre_dapan(trade_cal):
     return merged
 
 
+def compute_ext_info(merged_ext):
+    c = merged_ext['close'].to_numpy()
+    merged_ext['sma5'] = talib.SMA(c, timeperiod=5)
+    merged_ext['sma10'] = talib.SMA(c, timeperiod=10)
+    merged_ext['sma20'] = talib.SMA(c, timeperiod=20)
+    merged_ext['sma60'] = talib.SMA(c, timeperiod=60)
+    merged_ext['sma120'] = talib.SMA(c, timeperiod=120)
+    merged_ext['sma250'] = talib.SMA(c, timeperiod=250)
+    return merged_ext
+
+
 # @numba.jit(nopython=True)
 def load_2_redis():
     isTest = consts.isTest
@@ -102,9 +115,9 @@ def load_2_redis():
     stock_dict_ext = {}
     now = time.time()
     for i in range(stock_basic.values.shape[0]):
-        if i > 1 and isTest:
+        if i > consts.test_code_count and isTest:
             break
-
+        now1 = time.time()
         # 因子-专业版
         stock_code = stock_basic.values[i][0]
         # query = (f"SELECT ts_code as code,trade_date as date,open_qfq as open,close_qfq as close,pct_change,"
@@ -112,7 +125,7 @@ def load_2_redis():
         #          f" FROM stk_factor_pro where ts_code = '{stock_code}'")
         # dv_ratio: 股息率
         query = (f"SELECT ts_code,trade_date,open_qfq,close_qfq,pct_chg,"
-                 f"high_qfq, low_qfq, vol, turnover_rate, volume_ratio, pe, pb, dv_ratio"
+                 f"high_qfq, low_qfq, turnover_rate, vol, pe, pb, dv_ratio, total_mv"
                  f" FROM stk_factor_pro where ts_code = '{stock_code}'")
         merged = clickhouse_util.from_table(query)
 
@@ -132,14 +145,23 @@ def load_2_redis():
         # merged = merged.drop(columns=['ts_code'])
         # merged = merged.set_index(['trade_date'])
         # merged = merged.sort_index()
+
+        # 'open': np.random.random(100),
+        # 'high': np.random.random(100),
+        # 'low': np.random.random(100),
+        # 'close': np.random.random(100),
+        # 'volume': np.random.random(100)
+
         merged['trade_date'] = merged['trade_date'].astype(int)
         merged = merged.rename(columns={'ts_code': 'code', 'trade_date': 'date',
-                                        'open_qfq': 'o', 'close_qfq': 'c',
-                                        'high_qfq': 'h', 'low_qfq':'l'})
-        stock_dict[stock_code] = merged[['code', 'date', 'o', 'c', 'pct_chg']]
-        stock_dict_ext[stock_code] = merged[
-            ['h', 'l', 'vol', 'turnover_rate', 'volume_ratio', 'pe', 'pb', 'dv_ratio']]
-        print("stock_code", stock_code, len(stock_dict), time.time() - now)
+                                        'open_qfq': 'open', 'close_qfq': 'close',
+                                        'high_qfq': 'high', 'low_qfq': 'low',
+                                        'vol': 'volume'})
+        stock_dict[stock_code] = merged.loc[:, merged.columns[:2]]
+        merged_ext = copy.deepcopy(merged[['code', 'date', 'close']])
+        merged_ext = compute_ext_info(merged_ext)
+        stock_dict_ext[stock_code] = merged_ext
+        print("stock_code", stock_code, len(stock_dict), time.time() - now1)
     # all = pd.concat(list)
     # all = all.set_index(['ts_code'])
     # all = all.sort_index()
@@ -152,14 +174,20 @@ def load_2_redis():
     print("read_ck cost", time.time() - now)
     return stock_dict, stock_dict_ext, shangzheng
 
-if __name__ == '__main__':
-    false_update = consts.false_update_redis
+
+def init_cache():
+    force_update = consts.force_update_redis
     with redis.Redis(host='localhost', port=6379, db=0) as r:
-        if false_update or not r.exists('a_base'):
+        r.config_set('proto-max-bulk-len', '9073741824')
+        if force_update or not r.exists(redis_key_a_base):
             now = time.time()
+            # r.flushdb()
             stock_base, stock_dict_ext, shangzheng = load_2_redis()
             r.set(redis_key_a_base, pickle.dumps(stock_base))
             r.set(redis_key_a_ext, pickle.dumps(stock_dict_ext))
-            r.set(redis_key_a_ref, pickle.dumps(shangzheng))
             r.save()
             print("load_2_redis cost", time.time() - now)
+
+
+if __name__ == '__main__':
+    init_cache()

@@ -8,32 +8,32 @@ import numpy as np
 
 
 # 最近3天都在5日线上，5日线最近10天超过至少两条其他均线
-def do_get_signal(nums_df, open, close, emaList):
-    if len(close) < 10:
+def do_get_signal(base, ext):
+    OFFSET = 280
+    close = base['close'].to_numpy()
+    if len(close) < OFFSET:
         return 1
 
     state_enum = ['can_buy', 'has_buy']
     state = 0
     total_money = 1
     buy_price = 0
-    ema5 = emaList[0]
-    ema10 = emaList[1]
-    ema20 = emaList[2]
-    ema30 = emaList[3]
-    ema60 = emaList[4]
-    ema250 = emaList[5]
-    rate = (close - open) / open
+    sma5 = ext['sma5'].to_numpy()
+    sma10 = ext['sma10'].to_numpy()
+    sma20 = ext['sma20'].to_numpy()
+    sma60 = ext['sma60'].to_numpy()
+    sma120 = ext['sma120'].to_numpy()
+    sma250 = ext['sma250'].to_numpy()
 
-    OFFSET = 145
+    pct_chg = base['pct_chg'].to_numpy()
+
+
+
     for i in range(OFFSET, len(close)):
-        backCount = 0
-        count = 0
         find_buy_signal = False
         find_sell_signal = False
         back = 22
-        tmp = rate[i + 1 - back:i + 1]
-        ratePos = np.sum(tmp[tmp > 0])
-        rateNag = np.sum(tmp[tmp < 0])
+
         if np.sum(tmp) > 0.30 and rateNag > -0.15:
             find_buy_signal = True
 
