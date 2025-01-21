@@ -157,7 +157,7 @@ def load_2_redis():
                                         'open_qfq': 'open', 'close_qfq': 'close',
                                         'high_qfq': 'high', 'low_qfq': 'low',
                                         'vol': 'volume'})
-        stock_dict[stock_code] = merged.loc[:, merged.columns[:2]]
+        stock_dict[stock_code] = merged
         merged_ext = copy.deepcopy(merged[['code', 'date', 'close']])
         merged_ext = compute_ext_info(merged_ext)
         stock_dict_ext[stock_code] = merged_ext

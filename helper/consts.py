@@ -1,7 +1,7 @@
 # coding:utf-8
 isTest = False
 force_update_redis = False
-test_code_count = 100
+test_code_count = 10
 reload_from_tushare = False
 
 redis_key_a_base = 'a_base' + str(isTest)

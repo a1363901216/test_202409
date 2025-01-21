@@ -5,12 +5,15 @@ import math
 import os
 
 import numpy as np
+from helper.tongdaxin.funcat import *
+from helper.tongdaxin.funcat.funcat import MA, CROSS
 
 
 # 最近3天都在5日线上，5日线最近10天超过至少两条其他均线
 def do_get_signal(base, ext):
     OFFSET = 280
     close = base['close'].to_numpy()
+    C = close
     if len(close) < OFFSET:
         return 1
 
@@ -24,18 +27,14 @@ def do_get_signal(base, ext):
     sma60 = ext['sma60'].to_numpy()
     sma120 = ext['sma120'].to_numpy()
     sma250 = ext['sma250'].to_numpy()
-
     pct_chg = base['pct_chg'].to_numpy()
 
-
+    # cross_signal = CROSS(sma5, sma10)
 
     for i in range(OFFSET, len(close)):
         find_buy_signal = False
         find_sell_signal = False
-        back = 22
-
-        if np.sum(tmp) > 0.30 and rateNag > -0.15:
-            find_buy_signal = True
+        find_buy_signal = sma5[i]>sma10[i] and sma5[i-1]<=sma10[i-1]
 
         if state == 0:
             if find_buy_signal:

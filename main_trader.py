@@ -1,13 +1,14 @@
 # coding:utf-8
 import pickle
 
+import numpy as np
 import pandas as pd
 import redis
 import talib
+import time
 
 from ck_2_redis import init_cache
 from helper import consts
-from old.MyStrategy import *
 
 from strategy import ma金叉买入
 
@@ -40,14 +41,14 @@ def get_ret(stock_base, stock_base_ext):
     count = 0
     for code, base in stock_base.items():
         ext = stock_base_ext[code]
-        if count % 10 == 0:
+        if count % 100 == 0:
             print("processing ", count)
         count = count + 1
         now1 = time.time()
         # ret = ma金叉买入.do_get_signal(stock_base, o, c, [sma5, sma10, sma20, sma60, sma120, sma250])
         ret = ma金叉买入.do_get_signal(base, ext)
         all_ret.append(ret)
-        print("compute one cost", time.time() - now1)
+        # print("compute one cost", time.time() - now1)
     # print(ret)
 
     print("compute cost", time.time() - now)
