@@ -1,11 +1,14 @@
 # coding:utf-8
+import pickle
 
 import pandas as pd
+import redis
 
+from helper import consts
 from old.MyStrategy import *
 
 
-import helper.get_ori_data, 近期涨幅超过30
+import helper.get_ori_data
 
 
 def convert_to_date_dict(stock_dict):
@@ -61,12 +64,27 @@ def get_ret(stock_dict):
 
     return all_ret
 
+def load():
+    with redis.Redis(host='localhost', port=6379, db=0) as r:
+        now = time.time()
+        stock_base = r.get(consts.redis_key_a_base)
+        stock_base_ext = r.get(consts.redis_key_a_ext)
+        stock_base_ref = r.get(consts.redis_key_a_ref)
+        print("read_redis cost", time.time() - now)
+
+        now = time.time()
+        stock_base = pickle.loads(stock_base)
+        stock_base_ext = pickle.loads(stock_base_ext)
+        stock_base_ref = pickle.loads(stock_base_ref)
+        print("read_redis dump cost", time.time() - now)
+        return stock_base, stock_base_ext, stock_base_ref
+
 if __name__ == '__main__':
     # os.environ['NUMBA_NUM_THREADS'] = '16'
     # 获取原始数据
     print("start ...")
-    ori_stock_dict, shangzheng = get_ori_data.load(isTest=False, reload_from_clickhouse=False)
+    stock_base, stock_dict_ext, shangzheng = load()
 
-    all_ret = get_ret(ori_stock_dict)
+    all_ret = get_ret(stock_base)
 
     print("final", np.mean(np.array(all_ret)))

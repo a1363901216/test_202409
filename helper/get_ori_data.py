@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 from helper.download_data import write_file, read_file
-from helper import clickhouse_util
+from helper import clickhouse_util, consts
 
 start_date = '20170101'
 end_date = '20250116'
@@ -70,6 +70,7 @@ def pre_dapan(trade_cal):
 
 # @numba.jit(nopython=True)
 def do_reload_from_clickhouse(isTest):
+    isTest = consts.isTest
     pd.set_option("future.no_silent_downcasting", True)
     clickhouse_util.optimize('trade_cal')
     clickhouse_util.optimize('stock_basic')
@@ -132,11 +133,11 @@ def do_reload_from_clickhouse(isTest):
     print('finish')
 
 
-def load(isTest, reload_from_clickhouse):
-    stock_all = None
+def load():
+    isTest, reload_from_clickhouse = consts.isTest, consts.reload_from_clickhouse
     now = time.time()
     if reload_from_clickhouse:
-        do_reload_from_clickhouse(isTest)
+        do_reload_from_clickhouse()
         print("do_reload_from_clickhouse ", time.time() - now)
 
     now = time.time()
@@ -145,10 +146,8 @@ def load(isTest, reload_from_clickhouse):
     else:
         stock_all = read_file(filename=file_name)
     print("read_file ", time.time() - now)
-    shangzheng = read_file(filename='../../data/shangzheng.pkl')
-    return stock_all, shangzheng
 
 
 if __name__ == '__main__':
     # main(isTest = True)
-    load(isTest=False, reload_from_clickhouse=True)
+    load()

@@ -1,10 +1,13 @@
+import pickle
 import time
 
 import pandas as pd
 import numpy as np
+import redis
 
+from helper.consts import redis_key_a_base, redis_key_a_ext, redis_key_a_ref
 from helper.download_data import write_file, read_file
-from helper import clickhouse_util, get_ori_data
+from helper import clickhouse_util, consts
 
 start_date = '20170101'
 end_date = '20240630'
@@ -67,10 +70,14 @@ def pre_dapan(trade_cal):
     merged.sort_index(inplace=True)
 
     write_file(filename='data/shangzheng.pkl', value=merged)
+    return merged
 
 
 # @numba.jit(nopython=True)
-def do_reload_from_clickhouse(isTest):
+def load_2_redis():
+    isTest = consts.isTest
+    now = time.time()
+
     pd.set_option("future.no_silent_downcasting", True)
     clickhouse_util.optimize('trade_cal')
     clickhouse_util.optimize('stock_basic')
@@ -88,20 +95,24 @@ def do_reload_from_clickhouse(isTest):
     # stock_basic = pd.DataFrame(['600823.SH', '002122.SZ'], columns=['ts_code'])
     # stock_basic = pd.DataFrame(['002122.SZ'], columns=['ts_code'])
     # stock_basic = pd.DataFrame(['000001.SZ'], columns=['ts_code'])
-    pre_dapan(trade_cal)
+    shangzheng = pre_dapan(trade_cal)
 
     list = []
     stock_dict = {}
+    stock_dict_ext = {}
+    now = time.time()
     for i in range(stock_basic.values.shape[0]):
         if i > 1 and isTest:
             break
 
-        now = time.time()
         # 因子-专业版
-
         stock_code = stock_basic.values[i][0]
-        query = (f"SELECT ts_code,trade_date,open_qfq,close_qfq,"
-                 f"vol,ema_qfq_5,ema_qfq_10,ema_qfq_20,ema_qfq_30,ema_qfq_60,ema_qfq_250"
+        # query = (f"SELECT ts_code as code,trade_date as date,open_qfq as open,close_qfq as close,pct_change,"
+        #          f"high_qfq as high, low_qfq as low, vol, turnover_rate, volume_ratio, pe, pb,dv_ratio"
+        #          f" FROM stk_factor_pro where ts_code = '{stock_code}'")
+        # dv_ratio: 股息率
+        query = (f"SELECT ts_code,trade_date,open_qfq,close_qfq,pct_chg,"
+                 f"high_qfq, low_qfq, vol, turnover_rate, volume_ratio, pe, pb, dv_ratio"
                  f" FROM stk_factor_pro where ts_code = '{stock_code}'")
         merged = clickhouse_util.from_table(query)
 
@@ -122,38 +133,33 @@ def do_reload_from_clickhouse(isTest):
         # merged = merged.set_index(['trade_date'])
         # merged = merged.sort_index()
         merged['trade_date'] = merged['trade_date'].astype(int)
-        stock_dict[stock_code] = merged
+        merged = merged.rename(columns={'ts_code': 'code', 'trade_date': 'date',
+                                        'open_qfq': 'o', 'close_qfq': 'c',
+                                        'high_qfq': 'h', 'low_qfq':'l'})
+        stock_dict[stock_code] = merged[['code', 'date', 'o', 'c', 'pct_chg']]
+        stock_dict_ext[stock_code] = merged[
+            ['h', 'l', 'vol', 'turnover_rate', 'volume_ratio', 'pe', 'pb', 'dv_ratio']]
         print("stock_code", stock_code, len(stock_dict), time.time() - now)
     # all = pd.concat(list)
     # all = all.set_index(['ts_code'])
     # all = all.sort_index()
-    if isTest:
-        write_file(filename=file_name_test, value=stock_dict)
-    else:
-        write_file(filename=file_name, value=stock_dict)
+    # if isTest:
+    #     write_file(filename=file_name_test, value=stock_dict)
+    # else:
+    #     write_file(filename=file_name, value=stock_dict)
 
     # print('finish')
-
-
-def load(isTest, reload_from_clickhouse):
-    stock_all = None
-    now = time.time()
-    if reload_from_clickhouse:
-        do_reload_from_clickhouse(isTest)
-        print("do_reload_from_clickhouse ", time.time() - now)
-
-    now = time.time()
-    if isTest:
-        stock_all = read_file(filename=file_name_test)
-    else:
-        stock_all = read_file(filename=file_name)
-    print("read_file ", time.time() - now)
-    shangzheng = read_file(filename='data/shangzheng.pkl')
-    # shangzheng['cal_date'] = shangzheng['cal_date'].astype(int)
-    return stock_all, shangzheng
-
+    print("read_ck cost", time.time() - now)
+    return stock_dict, stock_dict_ext, shangzheng
 
 if __name__ == '__main__':
-    # main(isTest = True)
-    stock_all, shangzheng = get_ori_data.load(isTest=False, reload_from_clickhouse=True)
-
+    false_update = consts.false_update_redis
+    with redis.Redis(host='localhost', port=6379, db=0) as r:
+        if false_update or not r.exists('a_base'):
+            now = time.time()
+            stock_base, stock_dict_ext, shangzheng = load_2_redis()
+            r.set(redis_key_a_base, pickle.dumps(stock_base))
+            r.set(redis_key_a_ext, pickle.dumps(stock_dict_ext))
+            r.set(redis_key_a_ref, pickle.dumps(shangzheng))
+            r.save()
+            print("load_2_redis cost", time.time() - now)
