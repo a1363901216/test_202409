@@ -5,6 +5,8 @@ import math
 import os
 
 import numpy as np
+import talib
+
 from helper.tongdaxin.funcat import *
 from helper.tongdaxin.funcat.funcat import MA, CROSS
 
@@ -21,13 +23,15 @@ def do_get_signal(base, ext):
     state = 0
     total_money = 1
     buy_price = 0
-    sma5 = ext['sma5'].to_numpy()
-    sma10 = ext['sma10'].to_numpy()
-    sma20 = ext['sma20'].to_numpy()
-    sma60 = ext['sma60'].to_numpy()
-    sma120 = ext['sma120'].to_numpy()
-    sma250 = ext['sma250'].to_numpy()
-    pct_chg = base['pct_chg'].to_numpy()
+    sma5 = talib.SMA(C, timeperiod=5)
+    sma10 = talib.SMA(C, timeperiod=10)
+    # sma5 = ext['sma5'].to_numpy()
+    # sma10 = ext['sma10'].to_numpy()
+    # sma20 = ext['sma20'].to_numpy()
+    # sma60 = ext['sma60'].to_numpy()
+    # sma120 = ext['sma120'].to_numpy()
+    # sma250 = ext['sma250'].to_numpy()
+    # pct_chg = base['pct_chg'].to_numpy()
 
     # cross_signal = CROSS(sma5, sma10)
 
