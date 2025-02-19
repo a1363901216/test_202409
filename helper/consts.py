@@ -1,6 +1,6 @@
 # coding:utf-8
 isTest = False
-force_update_redis = False
+force_update_redis = True
 test_code_count = 10
 reload_from_tushare = False
 

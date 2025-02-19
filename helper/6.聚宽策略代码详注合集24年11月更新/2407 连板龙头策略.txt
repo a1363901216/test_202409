@@ -1,0 +1,382 @@
+# 风险及免责提示：该策略由聚宽用户在聚宽社区分享，仅供学习交流使用。
+# 原文一般包含策略说明，如有疑问请到原文和作者交流讨论。
+# 原文网址：https://www.joinquant.com/post/44926
+# 标题：连板龙头策略
+# 作者：wywy1995
+# 回测时间需要选择 分钟
+
+from jqdata import *  # 从jqdata模块导入所有内容
+from jqfactor import *
+from jqlib.technical_analysis import *
+import datetime as dt
+import pandas as pd    # 将 pandas库导入当前环境，并给它指定一个别名 pd
+
+def initialize(context):
+    set_option('use_real_price', True) # 设置使用真实价格进行交易
+    set_option('avoid_future_data', True)  # 避免使用未来数据
+    log.set_level('system', 'error')  # 设置日志级别，只记录系统错误信息
+    # 设置分仓数量，即策略同时持有的股票数量上限
+    g.ps = 10  # 一般最高板龙头股票数量不会超过10个
+    # 定义使用的聚宽因子
+    g.jqfactor = 'VOL5' # 这里以5日平均换手率为例（只是做为示例）
+    # 设置因子值的排序方式，True表示升序（因子值最小），False表示降序（因子值最大）
+    g.sort = True   # 选取因子值最小的股票
+    # 定义每日运行的函数和时间
+    run_daily(get_stock_list, '9:01')
+    run_daily(buy, '09:30')
+    run_daily(sell, '14:50')
+    run_daily(print_position_info, '15:02')
+
+# 选股函数，用于筛选出符合策略要求的股票
+def get_stock_list(context): 
+    date = context.previous_date    # 获取策略运行前一天的日期
+    date = transform_date(date, 'str')  # 将日期转换为字符串格式，以便后续处理
+    initial_list = prepare_stock_list(date)    # 获取初始股票列表
+    hl_list = get_hl_stock(initial_list, date)    # 从初始列表中筛选出当日涨停的股票
+    # 获取全部连板股票的连板数和一字连板数
+    ccd = get_continue_count_df(hl_list, date, 20) if len(hl_list) != 0 else pd.DataFrame(index=[], data={'count':[],'extreme_count':[]})
+    # 获取最高连板数
+    M = ccd['count'].max() if len(ccd) != 0 else 0
+    # 筛选出最高连板数的股票，即龙头股票
+    ccd0 = pd.DataFrame(index=[], data={'count':[],'extreme_count':[]})
+    CCD = ccd[ccd['count'] == M] if M != 0 else ccd0
+    lt = list(CCD.index)  # 龙头股票列表
+
+    #可以利用多个因子对lt进行进一步筛选大幅提高收益并降低回撤，使用到的因子见代码末尾
+    # 使用到的因子可以在代码末尾找到
+    # 打印全部合格的龙头股票
+    df = get_factor_filter_df(context, lt, g.jqfactor, g.sort)
+    stock_list = list(df.index)  # 合格的龙头股票列表
+    # 根据分仓数量截取股票列表，准备买入
+    g.target_list = stock_list[:(g.ps - len(context.portfolio.positions))]
+
+# 交易
+def buy(context):
+    current_data = get_current_data()    # 获取当前市场数据
+    value = context.portfolio.total_value / g.ps     # 计算每个股票应该买入的金额，这里将总资产平均分配到每个股票上
+    for s in g.target_list:    # 遍历目标股票列表，尝试买入
+        if context.portfolio.available_cash/current_data[s].last_price>100:  # 检查是否有足够的资金买入至少100股
+            # 如果股票开盘即涨停，使用限价单排队买入
+            if current_data[s].last_price == current_data[s].high_limit:       # 使用开盘价作为限价单的价格下单
+                order_value(s, value, LimitOrderStyle(current_data[s].day_open))
+                print('买入' + s)
+                print('———————————————————————————————————')
+            # 如果开盘未涨停，用市价单即刻买入
+            else:
+                order_value(s, value, MarketOrderStyle(current_data[s].day_open))      # 使用市价单并指定开盘价作为保护价
+                print('买入' + s)
+                print('———————————————————————————————————')
+
+# 定义卖出函数，用于执行卖出操作
+def sell(context):
+    hold_list = list(context.portfolio.positions)     # 获取当前持有的股票列表
+    current_data = get_current_data()     # 获取当前市场数据
+    for s in hold_list:       # 遍历当前持有的股票，尝试卖出
+        # 条件1：不涨停
+        if not (current_data[s].last_price == current_data[s].high_limit):  # 检查当前股票的当前价格是否等于涨停价
+            if context.portfolio.positions[s].closeable_amount != 0:    # 确保该股票有可卖出的数量，即持有数量大于0
+                # 条件2.1：持有一定时间
+                start_date = transform_date(context.portfolio.positions[s].init_time, 'str')   # 获取该股票的持仓起始日期，并转换为字符串格式
+                target_date = get_shifted_date(start_date, 2, 'T')    # 计算目标日期（持仓起始日期之后的第二个交易日），并转换为字符串格式
+                current_date = transform_date(context.current_dt, 'str')   # 获取当前日期，并转换为字符串格式
+                # 条件2.2：已经盈利， 获取该股票的持仓成本和当前价格
+                cost = context.portfolio.positions[s].avg_cost 
+                price = context.portfolio.positions[s].price
+                ret = 100 * (price/cost-1)   # 计算收益率，如果收益率大于0，即认为已经盈利
+                # 在满足条件1的前提下，条件2中只要满足一个即卖出
+                if current_date >= target_date or ret > 0:      # 如果满足持有时间或已经盈利，则考虑卖出
+                    if current_data[s].last_price > current_data[s].low_limit:    # 确保卖出价格不低于跌停价
+                        order_target_value(s, 0)    # 将股票卖出至0股
+                        print('卖出' + s)
+                        print('———————————————————————————————————')
+# 可以收盘后判断风险决定第二天是否提前卖出，可以降低回撤
+############################################################################################################################################################################
+# 定义处理日期相关函数，用于转换日期对象为不同格式
+def transform_date(date, date_type):
+    # 根据输入的日期类型，进行相应的转换
+    if type(date) == str:  # 如果输入的是字符串格式的日期
+        str_date = date  # 直接使用输入的字符串
+        dt_date = dt.datetime.strptime(date, '%Y-%m-%d')  # 将字符串转换为datetime对象
+        d_date = dt_date.date()  # 将datetime对象转换为date对象
+    elif type(date) == dt.datetime:  # 如果输入的是datetime对象
+        str_date = date.strftime('%Y-%m-%d')  # 将datetime对象格式化为字符串
+        dt_date = date  # 直接使用输入的datetime对象
+        d_date = dt_date.date()  # 将datetime对象转换为date对象
+    elif type(date) == dt.date:  # 如果输入的是date对象
+        str_date = date.strftime('%Y-%m-%d')  # 将date对象格式化为字符串
+        dt_date = dt.datetime.strptime(str_date, '%Y-%m-%d')  # 将字符串转换为datetime对象
+        d_date = date  # 直接使用输入的date对象
+    dct = {'str':str_date, 'dt':dt_date, 'd':d_date}  # 创建一个字典，包含字符串格式、datetime对象和date对象
+    return dct[date_type]   # 根据输入的date_type参数，从字典中返回相应的日期格式
+
+# 定义一个函数，用于根据给定的日期和天数类型，计算偏移后的日期
+def get_shifted_date(date, days, days_type='T'):
+    d_date = transform_date(date, 'd')    # 将输入的日期转换为datetime.date对象
+    yesterday = d_date + dt.timedelta(-1)    # 获取上一个自然日
+    if days_type == 'N':  # 如果天数类型为'N'，表示移动的是自然日
+        shifted_date = yesterday + dt.timedelta(days+1)  # 计算偏移后的日期，即上一个自然日加上所需的天数加一（因为已经获取了上一个自然日）
+    if days_type == 'T':    # 如果天数类型为'T'，表示移动的是交易日
+        all_trade_days = [i.strftime('%Y-%m-%d') for i in list(get_all_trade_days())]    # 获取所有交易日的列表
+        #如果上一个自然日是交易日，根据其在交易日列表中的index计算平移后的交易日        
+        if str(yesterday) in all_trade_days:   # 检查上一个自然日是否是交易日
+            shifted_date = all_trade_days[all_trade_days.index(str(yesterday)) + days + 1]   # 如果是交易日，直接在交易日列表中找到对应的索引并计算偏移后的交易日
+        else:  #否则，从上一个自然日向前数，先找到最近一个交易日，再开始平移
+            for i in range(100):
+                last_trade_date = yesterday - dt.timedelta(i)   # 从昨天（yesterday）开始，向前逐日递减，尝试找到一个交易日。
+                # 将计算出的日期转换为字符串格式，以便与交易日列表中的日期格式进行比较
+                if str(last_trade_date) in all_trade_days:
+                    # 如果找到的日期是交易日列表中的一个，则计算偏移后的交易日
+                    # 首先获取该交易日在列表中的索引，然后根据所需的偏移天数计算新的索引位置，获取偏移后的交易日
+                    shifted_date = all_trade_days[all_trade_days.index(str(last_trade_date)) + days + 1]
+                    break  # 找到所需的交易日后，使用break语句退出循环
+    return str(shifted_date)    # 返回计算得到的偏移后的日期字符串
+
+# 排除上市时间小于days日的股票（新股）
+def filter_new_stock(initial_list, date, days=50):  
+    d_date = transform_date(date, 'd')   # 新上市的股票定义为在指定天数内上市的股票
+    # 使用列表推导式，遍历初始股票列表，获取每只股票的上市日期，检查当前日期与上市日期之间的时间差是否大于指定的天数，如果时间差大于指定的天数，说明该股票不是新上市的股票，将其包含在结果列表中
+    return [stock for stock in initial_list if d_date - get_security_info(stock).start_date > dt.timedelta(days=days)]
+
+# 定义一个函数，从股票列表中筛选出非ST股票。
+def filter_st_stock(initial_list, date):
+    str_date = transform_date(date, 'str')    # 将输入的日期转换为字符串格式
+    # 检查今天是否是交易日，如果不是，则将日期调整为昨天的交易日，因为ST股票的标识可能在非交易日不会更新。
+    if get_shifted_date(str_date, 0, 'N') != get_shifted_date(str_date, 0, 'T'):
+        str_date = get_shifted_date(str_date, -1, 'T')        # 如果今天不是交易日，则获取昨天的交易日作为查询日期
+    # 使用get_extras函数获取股票的ST状态信息， 'is_st'字段表示股票是否为ST股票，True表示是ST股票，False表示不是。
+    df = get_extras('is_st', initial_list, start_date=str_date, end_date=str_date, df=True)
+    df = df.T    # 转置DataFrame，使得股票代码成为行索引，ST状态成为列
+    df.columns = ['is_st']    # 设置列名为'is_st'
+    df = df[df['is_st'] == False]    # 筛选出非ST股票，即'is_st'列值为False的股票。
+    filter_list = list(df.index)    # 从筛选后的DataFrame中获取股票代码列表。
+    return filter_list    # 返回非ST股票的列表。
+
+# 过滤科创北交股票
+def filter_kcbj_stock(initial_list):
+    # 使用列表推导式，遍历初始股票列表，过滤掉科创板和北交所的股票
+    return [stock for stock in initial_list if stock[0] != '4' and stock[0] != '8' and stock[:2] != '68']
+
+# 过滤停牌股票
+def filter_paused_stock(initial_list, date):
+    # 使用get_price函数获取指定日期的股票数据，只获取'paused'字段，即停牌状态
+    df = get_price(initial_list, end_date=date, frequency='daily', fields=['paused'], count=1, panel=False, fill_paused=True)
+    df = df[df['paused'] == 0]  # 筛选出未停牌的股票，即'paused'字段值为0的股票
+    paused_list = list(df.code)  # 从筛选后的DataFrame中提取股票代码，形成未停牌的股票列表
+    return paused_list  # 返回未停牌的股票列表
+
+# 过滤涨停的股票
+def filter_extreme_limit_stock(context, stock_list, date):
+    tmp = []  # 初始化一个空列表，用于存储未达到涨跌停限制的股票
+    for stock in stock_list:          # 遍历输入的股票列表
+        # 使用get_price函数获取指定日期的股票数据，只获取'low'（最低价）和'high_limit'（涨停价）字段
+        df = get_price(stock, end_date=date, frequency='daily', fields=['low','high_limit'], count=1, panel=False)
+        if df.iloc[0,0] < df.iloc[0,1]:  # 检查获取的数据中，最低价是否小于涨停价
+            tmp.append(stock)   # 如果最低价小于涨停价，则认为该股票未达到涨跌停限制，将其添加到临时列表中。
+    return tmp
+
+# 每日初始股票池
+def prepare_stock_list(date): 
+    initial_list = get_all_securities('stock', date).index.tolist()  #获取指定日期包含所有股票的列表
+    initial_list = filter_kcbj_stock(initial_list)  # 筛选掉科创板及创业板股票
+    initial_list = filter_new_stock(initial_list, date)  # 筛选掉新上市的股票
+    initial_list = filter_st_stock(initial_list, date)   # 筛选掉ST股票
+    initial_list = filter_paused_stock(initial_list, date)   # 筛选掉停牌的股票
+    return initial_list  # 返回经过筛选的股票列表，这些股票将作为每日交易的股票池
+
+# 初始化情绪列表
+def get_init_emo_count(context, date):
+    # 计算给定日期前两天的日期，用于获取前两个交易日的数据
+    d1 = get_shifted_date(date, -3)
+    d2 = get_shifted_date(date, -2)
+    date_list = [d1, d2]  # 创建一个包含前两天日期的列表
+    emo_count = []  # 初始化情绪计数列表，用于存储每个交易日的情绪值
+    for date in date_list:     # 遍历日期列表，对每个日期进行情绪分析
+        initial_list = prepare_stock_list(date)   # 为给定日期准备初始股票列表
+        hl_list = get_hl_stock(initial_list, date)  # 获取当日涨停的股票列表
+        # 如果涨停股票列表不为空，则获取它们的连板数据，否则创建一个空的DataFrame
+        CCD = get_continue_count_df(hl_list, date, 20) if len(hl_list) != 0 else pd.DataFrame(index=[], data={'count':[],'extreme_count':[]})
+        M = CCD['count'].max() if len(CCD) != 0 else 0  # 获取连板数据中的最大连板数，如果连板数据为空，则情绪值设为0
+        emo_count.append(M)  # 将计算出的情绪值添加到情绪计数列表中
+    return emo_count  # 返回情绪计数列表，包含了前两天的最大连板数作为情绪指标
+
+# 计算热门概念
+def get_hot_concept(dct, date):
+    concept_count = {}  # 初始化一个字典，用于存储每个概念出现涨停的次数
+    for key in dct:     # 遍历传入的概念字典，该字典包含股票及其对应的概念信息
+        for i in dct[key]['jq_concept']:    # 遍历股票对应的所有概念
+            if i['concept_name'] in concept_count.keys():       # 如果概念名称已经在概念计数字典中
+                concept_count[i['concept_name']] += 1           # 则增加该概念的计数
+            else:
+                # 如果概念名称不在概念计数字典中，且不是排除的概念（如融资融券等），则添加到字典中并设置计数为1
+                if i['concept_name'] not in ['转融券标的', '融资融券', '深股通', '沪股通']:
+                    concept_count[i['concept_name']] = 1
+    # 将概念计数字典转换为DataFrame，其中包含概念名称和计数
+    df = pd.DataFrame(list(concept_count.items()), columns=['concept_name','concept_count'])
+    df = df.set_index('concept_name')     # 将概念名称设置为DataFrame的索引
+    df = df.sort_values(by='concept_count', ascending=False)     # 根据概念计数对DataFrame进行降序排序
+    max_num = df.iloc[0,0]   # 获取出现涨停次数最多的概念的计数
+    df = df[df['concept_count'] == max_num]     # 筛选出与最热门概念计数相同的所有概念
+    concept = list(df.index)[0]   # 获取最热门概念的名称
+    return concept   # 返回最热门的概念名称
+
+# 筛选出属于特定概念的股票
+def filter_concept_stock(dct, concept):
+    tmp_set = set() # 初始化一个集合，用于存储属于特定概念的股票代码，使用集合可以自动去除重复项
+    for k,v in dct.items():  # 遍历输入的股票字典，该字典包含股票代码和对应的概念信息
+        for d in dct[k]['jq_concept']:   # 遍历股票对应的所有概念
+            if d['concept_name'] == concept:  # 检查概念名称是否与指定的概念名称匹配
+                tmp_set.add(k)  # 如果匹配，将股票代码添加到集合中
+    return list(tmp_set)  # 将集合转换为列表并返回，列表中包含了所有属于指定概念的股票代码
+
+# 筛选出某一日涨停的股票
+def get_hl_stock(initial_list, date):
+    # 使用get_price函数获取指定日期的股票数据，包括收盘价和涨停价
+    df = get_price(initial_list, end_date=date, frequency='daily', fields=['close','high_limit'], count=1, panel=False, fill_paused=False, skip_paused=False)
+    df = df.dropna()   # 去除停牌股票
+    df = df[df['close'] == df['high_limit']]   # 筛选出收盘价等于涨停价的股票，即当天涨停的股票
+    hl_list = list(df.code)  # 从筛选后的DataFrame中提取涨停股票的代码，并将它们转换为列表
+    return hl_list   # 返回涨停股票的代码列表
+
+# 计算涨停数
+def get_hl_count_df(hl_list, date, watch_days):
+    # 使用get_price函数获取指定日期前watch_days天内的股票数据，包括收盘价、涨停价和最低价
+    df = get_price(hl_list, end_date=date, frequency='daily', fields=['close','high_limit','low'], count=watch_days, panel=False, fill_paused=False, skip_paused=False)
+    df.index = df.code  # 将DataFrame的索引设置为股票代码，方便后续操作
+    #计算涨停与一字涨停数，一字涨停定义为最低价等于涨停价
+    # 初始化两个列表，用于存储每只股票的涨停次数和一字涨停次数
+    hl_count_list = []
+    extreme_hl_count_list = []
+    # 遍历股票列表，计算每只股票的涨停次数
+    for stock in hl_list:
+        df_sub = df.loc[stock]  # 选取特定股票在观察期内的数据
+        hl_days = df_sub[df_sub.close==df_sub.high_limit].high_limit.count()   # 计算涨停天数，即收盘价等于涨停价的天数
+        extreme_hl_days = df_sub[df_sub.low==df_sub.high_limit].high_limit.count()  # 计算一字涨停天数，即最低价等于涨停价的天数，这通常表示股票开盘即涨停并持续到收盘。
+        # 将计算结果添加到相应的列表中
+        hl_count_list.append(hl_days)
+        extreme_hl_count_list.append(extreme_hl_days)
+    #创建df记录，记录每只股票的涨停次数和一字涨停次数
+    df = pd.DataFrame(index=hl_list, data={'count':hl_count_list, 'extreme_count':extreme_hl_count_list})
+    return df   # 返回包含涨停次数统计的DataFrame
+
+# 计算连板数
+def get_continue_count_df(hl_list, date, watch_days):
+    df = pd.DataFrame()  # 初始化一个空的DataFrame，用于存储连续涨停数据
+    for d in range(2, watch_days+1):     # 遍历从2到watch_days的每一天，计算每只股票的连续涨停天数
+        HLC = get_hl_count_df(hl_list, date, d)       # 调用get_hl_count_df函数获取每只股票在d天内的涨停次数
+        CHLC = HLC[HLC['count'] == d]      # 从HLC中筛选出涨停天数正好等于d天的股票
+        df = df.append(CHLC)       # 将筛选结果追加到df中
+    stock_list = list(set(df.index))      # 从df中提取唯一的股票代码列表
+    ccd = pd.DataFrame()  # 初始化一个空的DataFrame，用于存储每只股票的连续涨停数据
+    for s in stock_list:        # 遍历股票列表，计算每只股票的连续涨停天数
+        tmp = df.loc[[s]]       # 选取特定股票在df中的记录
+        if len(tmp) > 1:        # 如果该股票有多条记录，取涨停天数最多的记录
+            M = tmp['count'].max()
+            tmp = tmp[tmp['count'] == M]
+        ccd = ccd.append(tmp)    # 将该股票的连续涨停数据追加到ccd中
+    if len(ccd) != 0:         # 如果ccd不为空
+        ccd = ccd.sort_values(by='count', ascending=False)     # 则按照涨停天数进行降序排序
+    return ccd  # 返回包含每只股票连续涨停数据的DataFrame
+
+# 筛选按因子值排名的股票
+def get_factor_filter_df(context, stock_list, jqfactor, sort):
+    if len(stock_list) != 0:      # 如果输入的股票列表不为空，执行以下操作
+        yesterday = context.previous_date         # 获取策略运行前一天的日期
+        # 使用get_factor_values函数获取股票列表中每只股票的指定因子值
+        score_list = get_factor_values(stock_list, jqfactor, end_date=yesterday, count=1)[jqfactor].iloc[0].tolist()
+        df = pd.DataFrame(index=stock_list, data={'score':score_list}).dropna()       # 创建一个DataFrame，索引为股票代码，数据为对应的因子得分
+        df = df.sort_values(by='score', ascending=sort)         # 根据因子得分对DataFrame进行排序
+    else:
+        df = pd.DataFrame(index=[], data={'score':[]})   # 如果股票列表为空，返回一个空的DataFrame
+    return df
+
+# 打印持仓信息
+def print_position_info(context):
+    # 计算每只股票持仓市值占总市值的百分比
+    position_percent = 100 * context.portfolio.positions_value /  context.portfolio.total_value
+    record(仓位 = round(position_percent, 2))  # 使用record函数记录持仓百分比，保留两位小数
+    #打印账户信息
+    for position in list(context.portfolio.positions.values()):   # 遍历投资组合中的每只股票持仓
+        securities=position.security    # 获取股票代码
+        cost=position.avg_cost          # 获取股票的平均持仓成本价
+        price=position.price            # 获取股票的当前价格
+        ret=100*(price/cost-1)          # 计算股票的收益率，以百分比表示
+        value=position.value            # 获取股票持仓的市值
+        amount=position.total_amount    # 获取股票持仓的数量
+        print('代码:{}'.format(securities))
+        print('成本价:{}'.format(format(cost,'.2f')))
+        print('现价:{}'.format(price))
+        print('收益率:{}%'.format(format(ret,'.2f')))
+        print('持仓(股):{}'.format(amount))
+        print('市值:{}'.format(format(value,'.2f')))
+        print('———————————————————————————————————')
+    print('———————————————————————————————————————分割线————————————————————————————————————————')
+
+############################################################################################################################################################################
+'''
+    ## 市场特征
+    #1 龙头
+    ccd0 = pd.DataFrame(index=[], data={'count':[],'extreme_count':[]})
+    CCD = ccd[ccd['count'] == M] if M != 0 else ccd0
+    m = CCD['extreme_count'].min()
+    CCD1 = CCD[CCD['extreme_count'] == m] if str(m) != 'nan' else ccd0
+    lt = list(CCD1.index)
+    #2 数量
+    l = len(CCD)
+    #3 晋级
+    r = 100 * len(CCD) / len(hl_list) if len(hl_list) != 0 else 0
+    #4 情绪
+    emo = M
+    g.emo_count.append(emo) #初始化时计算g.emo_count
+    #5 周期
+    cyc = g.emo_count[-1] if g.emo_count[-1] == max(g.emo_count[-3:]) and g.emo_count[-1] != 0 else 0 #根据连板数判断情绪周期  
+    cyc = 1 if cyc == emo else 0
+    
+    ## 热门股票池
+    try:
+        dct = get_concept(hl_list, date)
+        hot_concept = get_hot_concept(dct, date)
+        hot_stocks = filter_concept_stock(dct, hot_concept)
+    except:
+        pass
+    
+    ## 龙头特征
+    condition_dct = {}
+    for s in lt:
+        try:
+            #6 独食
+            ds = ccd.loc[s]['extreme_count']
+            #7 市值
+            sz = get_fundamentals(query(valuation.code, valuation.circulating_market_cap).filter(valuation.code==s), date).iloc[0,1]
+            #8 换手
+            hs = HSL([s], date)[0][s]
+            #9 龙头概念
+            try:
+                c = 1 if s in hot_stocks else 0
+            except:
+                c = 0
+            
+            ## 逻辑判断
+            condition = ''
+            if hs? ds? emo?:
+                # 上升周期
+                if cyc? sz?:
+                    condition += '上升周期 '
+                # 资金接力
+                if ds? hs? hs?:
+                    condition += '资金接力 '
+                # 题材初期
+                if c? emo?:
+                    condition += '题材初期(' + str(hot_concept) + ') '
+                # 热点集中
+                if l? r?:
+                    condition += '热点集中 '
+                # 情绪突破
+                if emo?:
+                    condition += '情绪突破 '
+            #获取符合逻辑的列表
+            if len(condition) != 0:
+                condition_dct[s] = get_security_info(s, date).display_name+' —— ' + condition
+        except:
+            pass
+    stock_list = list(condition_dct.keys())
+'''

@@ -103,7 +103,12 @@ def load_2_redis():
     clickhouse_util.optimize('zhishu')
 
     trade_cal = clickhouse_util.from_table('SELECT * FROM trade_cal order by cal_date')
-    stock_basic = clickhouse_util.from_table('SELECT ts_code FROM stock_basic order by ts_code')
+    # 排除科创 北交 st 退市
+    query_stock_sql = "SELECT ts_code FROM stock_basic where  \
+    (name not like 'st') and    (name not like '8%') and   (name not like '688%')  \
+    and market not in ('北交所', '科创板') \
+         order by ts_code"
+    stock_basic = clickhouse_util.from_table(query_stock_sql)
     # stock_basic = pd.DataFrame(['002122.SZ'], columns=['ts_code'])
     # stock_basic = pd.DataFrame(['600823.SH', '002122.SZ'], columns=['ts_code'])
     # stock_basic = pd.DataFrame(['002122.SZ'], columns=['ts_code'])

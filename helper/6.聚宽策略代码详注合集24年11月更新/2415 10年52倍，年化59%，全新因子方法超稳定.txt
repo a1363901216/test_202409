@@ -1,0 +1,279 @@
+# 风险及免责提示：该策略由聚宽用户在聚宽社区分享，仅供学习交流使用。
+# 原文一般包含策略说明，如有疑问请到原文和作者交流讨论。
+# 原文网址：https://www.joinquant.com/post/44699
+# 标题：10年52倍，年化59%，全新因子方法超稳定
+# 作者：小白F
+
+#导入函数库
+from jqdata import *  # 从jqdata模块导入所有内容
+from jqfactor import *  # 从jqdata模块导入所有内容
+import numpy as np      # 导入numpy库
+import pandas as pd   # 导入pandas库并设置别名pd
+# 定义行业代码列表
+industry_code = ['HY001', 'HY002', 'HY003', 'HY004', 'HY005', 'HY006', 'HY007', 'HY008', 'HY009', 'HY010', 'HY011']
+
+#初始化函数 
+def initialize(context):
+    # 设定基准
+    set_benchmark('000905.XSHG')
+    # 用真实价格交易
+    set_option('use_real_price', True)
+    # 打开防未来函数
+    set_option("avoid_future_data", True)
+    # 将滑点设置为0
+    set_slippage(FixedSlippage(0))
+    # 设置交易成本万分之三，不同滑点影响可在归因分析中查看
+    set_order_cost(OrderCost(open_tax=0, close_tax=0.001, open_commission=0.0003, close_commission=0.0003, close_today_commission=0, min_commission=5),type='stock')
+    # 过滤order中低于error级别的日志
+    log.set_level('order', 'error')
+    log.set_level('system', 'error') 
+    #初始化全局变量
+    g.no_trading_today_signal = False  # 标记是否为非交易日
+    g.stock_num = 3  # 设置要持有的股票数量
+    g.hold_list = []   # 初始化当前持仓的股票列表
+    g.yesterday_HL_list = []    # 记录昨日涨停的股票
+    g.factor_list = [     # 定义因子列表，包含因子名称和对应的参数
+        {'ARBR': (-0.9996444781983547, 0.9986148448690932)}
+        ]
+    g.chosen_factor = ['ARBR']    # 选择使用的因子
+    g.month_day = 1       # 设置每月运行的日期
+    # 设置交易运行时间
+    run_daily(prepare_stock_list, '9:05')     # 每天09:05 运行 prepare_stock_list
+    run_weekly(weekly_adjustment, 1, '9:30')  # 每周第一个交易日的09:30 运行 weekly_adjustment
+    run_daily(check_limit_up, '14:00')        # 每天14:00 运行 check_limit_up  检查持仓中的涨停股是否需要卖出
+    run_daily(close_account, '14:30')         # 每天14:30 运行 close_account
+    # run_daily(print_position_info, '15:10')     # 每天15:10 运行 print_position_info
+
+#1-1 准备股票池
+def prepare_stock_list(context):
+    #获取已持有列表
+    g.hold_list= []   # 初始化持仓列表，g.hold_list 用于存储当前持仓的股票代码
+    for position in list(context.portfolio.positions.values()):   # 遍历当前持仓的每个持仓价值
+        stock = position.security    # 获取股票代码
+        g.hold_list.append(stock)    # 将股票代码添加到持仓列表
+    #获取昨日涨停列表
+    if g.hold_list != []:            # 如果当前持仓列表不为空，即存在持仓
+        # 获取每只股票的昨日收盘价和涨停价
+        df = get_price(g.hold_list, end_date=context.previous_date, frequency='daily', fields=['close','high_limit'], count=1, panel=False, fill_paused=False)
+        df = df[df['close'] == df['high_limit']]  # 筛选出昨日收盘价等于涨停价的股票，即昨日涨停的股票
+        g.yesterday_HL_list = list(df.code)       # 更新昨日涨停列表，存储为股票代码列表
+    else:
+        g.yesterday_HL_list = []                  # 如果没有持仓，昨日涨停列表为空
+    # 判断今天是否为账户资金再平衡的日期，使用 today_is_between 函数判断当前日期是否在 '04-05' 到 '04-30' 之间
+    g.no_trading_today_signal = today_is_between(context, '04-05', '04-30')
+    
+#1-2 选股模块
+def get_stock_list(context):
+    #指定日期防止未来数据
+    yesterday = context.previous_date   # 使用 context.previous_date 获取策略运行前一天的日期，避免使用未来数据
+    today = context.current_dt   # 获取当前日期
+    # 获取所有上市股票的列表
+    initial_list = get_all_securities('stock', today).index.tolist()  #  获取当前日期所有上市股票的列表， .index.tolist() 将股票代码的索引转换为列表
+    initial_list = filter_all_stock2(context, initial_list)    # 过滤股票列表，移除不符合条件的股票
+    final_list = []       # 初始化最终股票列表
+    factor_list = list(g.factor_list[0].keys())    # 获取因子列表
+    # print(factor_list)
+    # 获取因子数据，get_factor_values 根据股票列表和因子列表获取因子值，end_date=yesterday 指定获取数据的日期为前一天
+    factor_data = get_factor_values(initial_list,factor_list, end_date=yesterday, count=1)
+    df_jq_factor_value = pd.DataFrame(index=initial_list, columns=factor_list)    # 创建因子值的DataFrame
+    for factor in factor_list:       # 将因子数据填充到DataFrame中
+        df_jq_factor_value[factor] = list(factor_data[factor].T.iloc[:,0])
+
+    #print('before:df_jq_factor_value is \n%s'% df_jq_factor_value)
+    # 对因子数据进行预处理，包括去极值、处理缺失值和标准化
+    df_jq_factor_value = data_preprocessing(df_jq_factor_value,initial_list,industry_code,yesterday) #标准化
+    #print('after:df_jq_factor_value is \n%s'% df_jq_factor_value)
+    #print('df_jq_factor_value.info is \n%s'% df_jq_factor_value.info)
+    # tar = g.model.predict_proba(df_jq_factor_value)
+
+    df = df_jq_factor_value    # 筛选符合条件的股票
+    df = df.dropna()  # 移除包含缺失值的行
+    for factor in g.chosen_factor :  
+        # print(df[factor_list[i]],factor_value[i][0])
+        # 根据因子的阈值筛选股票，筛选出在因子阈值范围内的股票
+        df = df[(df[factor]>=g.factor_list[0][factor][0]) & (df[factor]<=g.factor_list[0][factor][1])]
+        print(f'过滤完 {factor} ，剩余：{len(df)}')      # 打印筛选后剩余的股票数量
+    # df['total_score'] = list(tar[:,1])
+    # df = df.sort_values(by=['total_score'], ascending=False) #分数越高即预测未来收益越高，排序默认降序
+    # postive_list = list(df.index)[:int(0.1*len(list(df.index)))]
+    postive_list = list(df.index)    # 获取筛选后的股票列表
+    log.info(f'因子筛选后的数量：{len(postive_list)}/{len(df)}')    # 记录筛选后的股票数量
+    # negative_list = list(df.index)[int(0.3*len(list(df.index))):-1]
+    # 查询股票的市值和每股收益（EPS）
+    q = query(valuation.code,valuation.circulating_market_cap,indicator.eps).filter(valuation.code.in_(postive_list)).order_by(valuation.circulating_market_cap.asc())
+    # q = query(valuation.code,valuation.circulating_market_cap,indicator.eps).filter(valuation.code.in_(postive_list)).order_by(indicator.eps.desc())
+    df2 = get_fundamentals(q)    # 获取股票的市值和每股收益（EPS）
+    df2 = df2[df2['eps']>0]      # 移除EPS小于0的股票
+    lst  = list(df2.code)    # 获取最终的股票列表
+    lst = lst[:min(g.stock_num, len(lst))]    # 如果最终股票数量超过预设数量，则截取前N个
+    # df['chosen'] = str(lst)
+    # log.info(df[['total_score', 'chosen']].head(6))
+    # 将最终的股票列表添加到final_list中
+    for stock in lst:
+        if stock not in final_list:
+            final_list.append(stock)
+    return final_list    # 返回最终的股票列表
+
+#1-3 定义每周调仓函数 ；整体调整持仓 ；目的是进行量化交易策略中的周期性调仓操作。
+def weekly_adjustment(context):
+    if g.no_trading_today_signal == False:      # 检查今日是否为非交易日，根据 g.no_trading_today_signal 信号判断
+        target_list = get_stock_list(context)   # 获取应买入的股票列表，使用自定义函数 get_stock_list
+        # 调仓卖出逻辑
+        for stock in g.hold_list:  # 遍历当前持有的股票列表
+            if (stock not in target_list) and (stock not in g.yesterday_HL_list):  # 如果股票不在目标买入列表中，并且不在昨日涨停或跌停的股票列表中
+                log.info("卖出[%s]" % (stock))                 # 记录卖出信息
+                position = context.portfolio.positions[stock]  # 获取股票当前的持仓情况
+                close_position(position)                       # 卖出股票持仓，调用close_position 函数，用于平仓
+            else:          
+                log.info("已持有[%s]" % (stock))               # 记录卖出信息
+        #调仓买入逻辑
+        position_count = len(context.portfolio.positions)      # 当前持仓的股票数量
+        target_num = len(target_list)                          # 目标买入的股票数量
+        if target_num > position_count:                        # 如果目标买入的股票数量大于当前持仓数量
+            value = context.portfolio.cash / (target_num - position_count)  # 计算每只股票应分配的资金
+            for stock in target_list:                          # 遍历目标买入的股票列表
+                if context.portfolio.positions[stock].total_amount == 0:    # 如果当前股票不在持仓中
+                    if open_position(stock, value):            # 买入股票，调用open_position 函数，用于开仓
+                        if len(context.portfolio.positions) == target_num:  # 如果持仓数量等于目标数量，则退出买入循环
+                            break   # 中断循环
+
+#1-4 定义检查昨日涨停股票的函数 ；调整昨日涨停股票
+def check_limit_up(context):
+    now_time = context.current_dt   # 获取当前时间
+    if g.yesterday_HL_list != []:   # 检查昨日涨停股票列表是否为空
+        #对昨日涨停股票观察到尾盘如不涨停则提前卖出，如果涨停即使不在应买入列表仍暂时持有
+        for stock in g.yesterday_HL_list:  # 遍历昨日涨停股票列表
+            # 获取当前股票的最新价格和涨停价
+            current_data = get_price(stock, end_date=now_time, frequency='1m', fields=['close','high_limit'], skip_paused=False, fq='pre', count=1, panel=False, fill_paused=True)
+            if current_data.iloc[0,0] <    current_data.iloc[0,1]:   # 检查当前价格是否小于涨停价，即判断今日是否打开涨停
+                log.info("[%s]涨停打开，卖出" % (stock))             # 如果打开涨停，则记录卖出信息
+                position = context.portfolio.positions[stock]        # 获取股票当前的持仓情况
+                close_position(position)                             # 卖出股票持仓
+            else:
+                log.info("[%s]涨停，继续持有" % (stock))             # 如果仍然涨停，则记录继续持有的信息
+
+# 过滤股票，过滤停牌退市ST股票，选股时使用
+def filter_all_stock2(context, stock_list):
+    # 过滤次新股（新股、老股的分界日期，两种指定方法）
+    # 新老股的分界日期, 自然日180天
+    # by_date = context.previous_date - datetime.timedelta(days=180)
+    # 新老股的分界日期，120个交易日
+    by_date = get_trade_days(end_date=context.previous_date, count=252)[0]
+    all_stocks = get_all_securities(date=by_date).index.tolist()
+    stock_list = list(set(stock_list).intersection(set(all_stocks)))
+
+    curr_data = get_current_data()
+    return [stock for stock in stock_list if not (
+            stock.startswith(('3', '68', '4', '8')) or  # 创业，科创，北交所
+            curr_data[stock].paused or # 停牌
+            curr_data[stock].is_st or  # ST
+            ('ST' in curr_data[stock].name) or # ST
+            ('*' in curr_data[stock].name) or # 退市 
+            ('退' in curr_data[stock].name) or # 退市
+            (curr_data[stock].day_open == curr_data[stock].high_limit) or  # 涨停开盘, 其它时间用last_price
+            (curr_data[stock].day_open == curr_data[stock].low_limit)  # 跌停开盘, 其它时间用last_price
+    )]
+
+#3-1 交易模块-自定义下单
+def order_target_value_(security, value):
+    if value == 0:   # 检查目标价值是否为0，即是否需要清仓
+        log.debug("Selling out %s" % (security)) # 日志记录清仓信息
+    else:
+        log.debug("Order %s to value %f" % (security, value)) # 日志记录下单到特定价值的信息
+    return order_target_value(security, value)  # 调用聚宽平台的order_target_value函数执行交易
+
+#3-2 交易模块-开仓
+def open_position(security, value):
+    order = order_target_value_(security, value)  # 尝试对指定股票进行下单到特定价值
+    if order != None and order.filled > 0:        # 检查订单是否创建成功且有成交
+        return True  # 开仓成功
+    return False  # 开仓失败
+
+#3-3 交易模块-平仓
+def close_position(position):
+    security = position.security  # 获取持仓的股票代码
+    order = order_target_value_(security, 0)  # 下单清仓 ；可能会因停牌失败
+    if order != None:  # 检查订单是否创建成功
+        if order.status == OrderStatus.held and order.filled == order.amount:  # 检查订单状态是否为全部成交且订单数量等于下单数量
+            return True  # 平仓成功
+    return False  # 平仓失败
+
+#4-1 判断今天是否为账户资金再平衡的日期
+def today_is_between(context, start_date, end_date):
+    today = context.current_dt.strftime('%m-%d')       # 获取当前日期并格式化为月-日格式
+    if (start_date <= today) and (today <= end_date):  # 判断当前日期是否在指定的起始和结束日期之间
+        return True   # 今天是资金再平衡的日期
+    else:
+        return False  # 今天不是资金再平衡的日期
+
+#4-2 清仓后次日资金可转
+def close_account(context):
+    if g.no_trading_today_signal == True:  # 检查今日是否为非交易日
+        if len(g.hold_list) != 0:          # 如果持有股票列表不为空，则清仓
+            for stock in g.hold_list:
+                position = context.portfolio.positions[stock]  # 获取股票的持仓信息
+                close_position(position)        # 执行平仓操作
+                log.info("卖出[%s]" % (stock))  # 日志记录卖出信息
+
+#4-3 打印每日持仓信息
+def print_position_info(context):
+    #打印当天成交记录
+    trades = get_trades()  # 获取当天所有成交记录
+    for _trade in trades.values():  # 遍历成交记录字典的值（即成交记录对象）
+        print('成交记录：'+str(_trade))
+    #打印账户信息
+    for position in list(context.portfolio.positions.values()):  # 遍历账户中所有持仓的股票信息
+        securities=position.security  # 获取股票代码
+        cost=position.avg_cost        # 获取股票当前持仓成本
+        price=position.price          # 获取股票最新价
+        ret=100*(price/cost-1)        # 计算股票收益率
+        value=position.value          # 获取股票市值
+        amount=position.total_amount  # 获取股票持股数量
+        print('代码:{}'.format(securities))
+        print('成本价:{}'.format(format(cost,'.2f')))
+        print('现价:{}'.format(price))
+        print('收益率:{}%'.format(format(ret,'.2f')))
+        print('持仓(股):{}'.format(amount))
+        print('市值:{}'.format(format(value,'.2f')))
+        print('———————————————————————————————————')
+    print('———————————————————————————————————————分割线————————————————————————————————————————')
+    
+# 取股票对应行业
+def get_industry_name(i_Constituent_Stocks, value):
+    # 从字典中筛选出包含特定股票的行业列表，返回包含该股票的所有行业列表
+    return [k for k, v in i_Constituent_Stocks.items() if value in v]
+
+#缺失值处理
+def replace_nan_indu(factor_data,stockList,industry_code,date):
+    # 处理DataFrame中的缺失值，首先使用行业平均值填充，如果行业也缺失，则使用全行业平均值填充
+    i_Constituent_Stocks={}  # 创建一个字典，用于存储每个行业的股票列表
+    data_temp=pd.DataFrame(index=industry_code,columns=factor_data.columns)  # 创建临时DataFrame用于存储行业平均值，索引为行业代码，列为因子数据的列名
+    for i in industry_code:    # 遍历行业代码
+        temp = get_industry_stocks(i, date)  # 获取属于该行业的股票列表
+        i_Constituent_Stocks[i] = list(set(temp).intersection(set(stockList)))  # 将属于该行业且在股票列表中的股票找出来
+        data_temp.loc[i]=mean(factor_data.loc[i_Constituent_Stocks[i],:])    # 计算这些股票的因子平均值，并赋值给临时DataFrame的相应位置
+    for factor in data_temp.columns:  # 遍历每个因子
+        #行业缺失值用所有行业平均值代替
+        null_industry=list(data_temp.loc[pd.isnull(data_temp[factor]),factor].keys())    # 找出该因子在行业平均值中缺失的行业
+        for i in null_industry:
+            data_temp.loc[i,factor]=mean(data_temp[factor])   # 对于这些缺失的行业，使用所有行业的该因子平均值来填充
+        null_stock=list(factor_data.loc[pd.isnull(factor_data[factor]),factor].keys())    # 找出该因子在股票因子数据中缺失的股票
+        # 对于这些缺失的股票，尝试使用它们所属行业的平均值来填充
+        for i in null_stock:    
+            industry=get_industry_name(i_Constituent_Stocks, i)    # 获取股票所属的行业列表
+            if industry:      # 如果找到了所属行业
+                factor_data.loc[i,factor]=data_temp.loc[industry[0],factor]       # 使用第一个所属行业的平均值来填充
+            else:
+                factor_data.loc[i,factor]=mean(factor_data[factor])     # 如果没有找到所属行业，使用所有股票的该因子平均值来填充
+    return factor_data   # 返回填充后的因子数据
+
+#数据预处理，factor_data: 包含因子数据的DataFrame，industry_code: 行业代码列表，
+def data_preprocessing(factor_data,stockList,industry_code,date):
+    # 使用winsorize_med函数对因子数据进行去极值处理
+    # scale=5表示使用中位数的5倍距离来确定边界值；inf2nan=False表示不将无穷大值转换为NaN；axis=0表示对DataFrame的每一列进行操作
+    factor_data = winsorize_med(factor_data, scale=5, inf2nan=False,axis=0) 
+    # 使用replace_nan_indu函数对因子数据中的缺失值进行处理；首先尝试使用行业平均值填充缺失值；如果行业数据也缺失，则使用所有股票的平均值进行填充
+    factor_data = replace_nan_indu(factor_data,stockList,industry_code,date)
+    # 使用standardlize函数对因子数据进行标准化处理；标准化是指将数据转换为具有零均值和单位方差的形式；axis=0表示对DataFrame的每一列进行操作
+    factor_data = standardlize(factor_data,axis=0) 
+    return factor_data    # 返回处理后的因子数据

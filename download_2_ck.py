@@ -1,4 +1,5 @@
 import time
+import warnings
 
 import tushare as ts
 from sqlalchemy import create_engine
@@ -10,13 +11,14 @@ from helper import clickhouse_util
 # pro._DataApi__http_url = 'http://tsapi.majors.ltd:7000'
 # ts.set_token('20241217202523-6dc513df-e2f2-4ab8-8dfd-038be46b739c')
 # ts.set_token('0d9223de9a848ebf6f2e268039b1762919bfbcb1826df44246220d4c')
-ts.set_token('a188f960b9ac36797794b1e2cfc5afa39b82cc15c2d168595a61e7dd')
+# ts.set_token('a188f960b9ac36797794b1e2cfc5afa39b82cc15c2d168595a61e7dd')
+ts.set_token('84c06577b518999f5f88eb835c572dfd533634ccfa46915b5d355852')
 
 pro = ts.pro_api()
 
-# start_date = '20170101'
-start_date = '20250101'
-end_date = '20250116'
+start_date = '20150101'
+end_date = '20200101'
+
 
 username = 'root'
 password = 'a000'
@@ -33,7 +35,7 @@ count = 0
 fields = 'ts_code,trade_date,open_qfq,high_qfq,low_qfq,close_qfq,pre_close,pct_chg,vol,turnover_rate,volume_ratio,pe,pb,dv_ratio,dv_ttm,total_share,total_mv,asi_qfq,asit_qfq,atr_qfq,bbi_qfq,bias1_qfq,bias2_qfq,bias3_qfq,boll_lower_qfq,boll_mid_qfq,boll_upper_qfq,brar_ar_qfq,brar_br_qfq,cci_qfq,cr_qfq,dfma_dif_qfq,dfma_difma_qfq,dmi_adx_qfq,dmi_adxr_qfq,dmi_mdi_qfq,dmi_pdi_qfq,downdays,updays,dpo_qfq,madpo_qfq,ema_qfq_10,ema_qfq_20,ema_qfq_250,ema_qfq_30,ema_qfq_5,ema_qfq_60,ema_qfq_90,emv_qfq,maemv_qfq,expma_12_qfq,expma_50_qfq,kdj_qfq,kdj_d_qfq,kdj_k_qfq,ktn_down_qfq,ktn_mid_qfq,ktn_upper_qfq,lowdays,topdays,ma_qfq_10,ma_qfq_20,ma_qfq_250,ma_qfq_30,ma_qfq_5,ma_qfq_60,ma_qfq_90,macd_qfq,macd_dea_qfq,macd_dif_qfq,mass_qfq,ma_mass_qfq,mfi_qfq,mtm_qfq,mtmma_qfq,obv_qfq,psy_qfq,psyma_qfq,roc_qfq,maroc_qfq,rsi_qfq_12,rsi_qfq_24,rsi_qfq_6,taq_down_qfq,taq_mid_qfq,taq_up_qfq,trix_qfq,trma_qfq,vr_qfq,wr_qfq,wr1_qfq,xsii_td1_qfq,xsii_td2_qfq,xsii_td3_qfq,xsii_td4_qfq'
 fields_no_pro = 'ts_code,trade_date,close,open,high,low,pre_close,pct_change,vol,open_qfq,close_qfq,high_qfq,low_qfq,pre_close_qfq'
 
-
+warnings.filterwarnings("ignore", category=FutureWarning)
 def get_stk_factor(cur_date):
     for _ in range(3):
         try:
@@ -149,7 +151,7 @@ if __name__ == '__main__':
     # clickhouse_util.optimize('stock_basic')
     # # clickhouse_util.optimize('stk_factor_pro')
     # # 股票因子专业
-    get_stk_factor_pro(trade_cal.values)
+    # get_stk_factor_pro(trade_cal.values)
     # get_stk_factor(trade_cal.values)
 
     # 历史名字 st 记录
@@ -190,13 +192,13 @@ if __name__ == '__main__':
     #     get_stk_factor(cur_date)
     #     sleep_milliseconds(20)
 
-    ## 财经 pb roe roa
-    # stock_basic = pro.stock_basic(exchange='', list_status='L', fields='')
-    # for i, _ in enumerate(stock_basic.values[:,0]):
-    #     cur_stock = stock_basic.values[i][0]
-    #     # cur_stock = '000035.SZ'
-    #     get_fina_indicator(cur_stock)
-    #     sleep_milliseconds(20)
+    # 财经 pb roe roa
+    stock_basic = pro.stock_basic(exchange='', list_status='L', fields='')
+    for i, _ in enumerate(stock_basic.values[:,0]):
+        cur_stock = stock_basic.values[i][0]
+        # cur_stock = '000035.SZ'
+        get_fina_indicator(cur_stock)
+        sleep_milliseconds(20)
 
     # 大盘指数
 

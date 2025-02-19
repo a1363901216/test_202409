@@ -1,0 +1,204 @@
+# 风险及免责提示：该策略由聚宽用户在聚宽社区分享，仅供学习交流使用。
+# 原文一般包含策略说明，如有疑问请到原文和作者交流讨论。
+# 原文网址：https://www.joinquant.com/post/42677
+# 标题：四年多翻9倍，年化73%，成长因子评分筛选
+# 作者：wolfman
+# 回测资金 200000
+
+# 三个成长因子评分后，筛选，每周调仓。年化达70%
+# 导入函数库
+from jqdata import *
+from jqfactor import *
+import pandas as pd
+
+#初始化函数 
+def initialize(context):
+    #设定股票池
+    set_benchmark('000905.XSHG')
+    # 用真实价格交易
+    set_option('use_real_price', True)
+    # 打开防未来函数
+    set_option("avoid_future_data", True)
+    # 将滑点设置为0
+    set_slippage(FixedSlippage(0))
+    # 设置交易成本万分之三
+    set_order_cost(OrderCost(open_tax=0, close_tax=0.001, open_commission=0.0003, close_commission=0.0003, close_today_commission=0, min_commission=5),type='fund')
+    # 过滤order中低于error级别的日志
+    log.set_level('order', 'error')
+    #选股参数
+    g.stock_num = 5   # 设置最大持仓股票数量
+    g.no_trading_today_signal = False   # 指示策略是否应该执行交易操作
+    g.hold_list = []  # 用于存储当前持有股票的列表。
+    run_weekly(my_trade, weekday=1, time='9:30', reference_security='000300.XSHG') # 每周第一个交易日运行my_trade
+    run_daily(close_account, '14:30')                                              # 每天 14:30 运行close_account
+    run_daily(print_position_info, time='15:10', reference_security='000300.XSHG') # 每天 15:10 运行
+
+#1-1 选股模块
+#先根据资产负债排除一些股票，再选出roe改善最多的列表，最后在这个列表中根据pb轮动
+def get_stock_list(context):
+    yesterday = str(context.previous_date)  # 获取前一交易日的日期
+    initial_list = get_all_securities().index.tolist() # 获取所有股票的列表，并转换为初始股票池列表
+    initial_list = filter_new_stock(context,initial_list)   # 过滤掉次新股
+    initial_list = filter_kcb_stock(context, initial_list)  # 过滤科创股票
+    initial_list = filter_st_stock(initial_list)        # 过滤掉 ST 股票
+    # 从因子库中获取指定股票列表的特定因子值
+    factor_values = get_factor_values(initial_list, ['operating_revenue_growth_rate', #营业收入增长率
+    'total_profit_growth_rate', #利润总额增长率
+    'earnings_growth', #5年盈利增长率
+    ], end_date=yesterday, count=1)
+    # 创建一个空的DataFrame，索引为股票代码，列名为从因子值中获取的因子名称
+    df = pd.DataFrame(index=initial_list, columns=factor_values.keys())
+    # 将获取到的因子值填充到DataFrame中对应的列，.T 是转置操作，.iloc[:,0] 表示取转置后的第一列数据
+    df['operating_revenue_growth_rate'] = list(factor_values['operating_revenue_growth_rate'].T.iloc[:,0])
+    df['total_profit_growth_rate'] = list(factor_values['total_profit_growth_rate'].T.iloc[:,0])
+    df['earnings_growth'] = list(factor_values['earnings_growth'].T.iloc[:,0])
+    # 计算每只股票的总评分，这里给不同的因子不同的权重，营业收入增长率占20%，利润总额增长率占40%，5年盈利增长率占40%
+    df['total_score'] = 0.2*df['operating_revenue_growth_rate'] + 0.4*df['total_profit_growth_rate'] +  0.4*df['earnings_growth'] 
+    df = df.sort_values(by=['total_score'], ascending=False)      # 根据总评分对DataFrame进行降序排序
+    # 选取评分最高的前10%的股票作为最终的股票列表，这里使用了int(0.1*len(list(df.index)))来确定前10%的股票数量
+    complex_growth_list = list(df.index)[:int(0.1*len(list(df.index)))]
+    # 使用SQLAlchemy的query对象构建查询，筛选出流通市值和每股收益（EPS）信息
+    # .filter(valuation.code.in_(complex_growth_list)) 表示只选择我们之前筛选出的股票列表
+    # .order_by(valuation.circulating_market_cap.asc()) 表示按照流通市值升序排序
+    q = query(valuation.code,valuation.circulating_market_cap,indicator.eps).filter(valuation.code.in_(complex_growth_list)).order_by(valuation.circulating_market_cap.asc())
+    df = get_fundamentals(q)    # 执行查询并获取结果
+    df = df[df['eps']>0]    # 过滤掉每股收益（EPS）小于0的股票
+    final_list = list(df.code)    # 从DataFrame中提取股票代码作为最终的股票列表
+    return final_list      # 返回最终筛选出的股票列表
+
+#1-2 开盘前打印自选股
+def print_stock_list_before_open(context):
+    stock_list = get_stock_list(context)            # 获取自选股列表，这通常是基于某些选股策略筛选出的股票
+    stock_list = filter_paused_stock(stock_list)    # 过滤掉停牌的股票
+    stock_list = stock_list[:g.stock_num]           # 只保留前g.stock_num（全局变量，表示要操作的股票数量）数量的股票
+    print('今日自选股:{}'.format(stock_list))       # 打印今日的自选股列表
+
+#2-1 开盘时运行函数
+def my_trade(context):
+    g.no_trading_today_signal = today_is_between(context, '04-05', '04-30')     #判断今天是否为账户资金再平衡的日期
+    g.hold_list= list(context.portfolio.positions.keys())    # 获取当前持有的股票列表
+    if g.no_trading_today_signal:    # 如果今天不是交易日（例如，是资金再平衡的日期），则直接返回，不进行交易
+        return
+    check_out_list = get_stock_list(context)   # 获取自选股列表
+    check_out_list = filter_limitup_stock(context, check_out_list)    # 过滤掉涨停的股票
+    check_out_list = filter_limitdown_stock(context, check_out_list)      # 过滤掉跌停的股票
+    check_out_list = filter_paused_stock(check_out_list)    # 过滤掉停牌的股票
+    check_out_list = check_out_list[:g.stock_num]  # 只保留前g.stock_num数量的股票
+    adjust_position(context, check_out_list)       # 调整持仓股票
+
+# 3-1 交易函数
+# 调整特定股票的持仓至特定价值
+def order_target_value_(security, value):
+	if value == 0:    # 如果目标价值为0，表示需要卖出该股票
+		log.debug("Selling out %s" % (security))     # 记录日志信息，表示卖出操作
+	else:
+		log.debug("Order %s to value %f" % (security, value))      # 否则，记录日志信息，表示调整持仓至特定价值的操作
+	return order_target_value(security, value)  # 调用order_target_value函数执行调整持仓操作，该函数会根据传入的价值调整持仓，返回订单对象
+
+# 买入特定价值的股票
+def open_position(security, value):
+	order = order_target_value_(security, value)      # 调用之前定义的order_target_value_函数尝试买入股票
+	if order != None and order.filled > 0:    # 检查订单是否创建成功，并且是否至少成交了一部分
+		return True      # 如果成功，返回True
+	return False   # 如果订单创建失败或未成交，返回False
+
+# 关闭特定股票的持仓，即全部卖出
+def close_position(position):
+	security = position.security    # 从持仓对象中获取股票代码
+	order = order_target_value_(security, 0)      # 调用之前定义的order_target_value_函数尝试卖出股票，目标价值设置为0，可能会因停牌失败
+	if order != None:    # 检查订单是否创建成功
+		if order.status == OrderStatus.held and order.filled == order.amount:        # 检查订单状态是否为held（已成交）且成交数量等于下单数量
+			return True       # 如果是，返回True
+	return False    # 如果订单创建失败或未全部成交，返回False
+
+# 卖出账户中所有持仓
+def close_account(context):
+    if g.no_trading_today_signal == True:    # 检查是否设置了不允许交易的信号
+        if len(g.hold_list) != 0:     # 如果今天不允许交易，但持有列表不为空
+            for stock in g.hold_list:     # 遍历持有列表中的所有股票
+                order_target(stock, 0)     # 对每只股票执行卖出操作，目标价值设置为0
+                log.info("卖出[%s]" % (stock))     # 记录日志信息，表示卖出操作
+
+# 股票调仓
+def adjust_position(context, buy_stocks):
+	for stock in context.portfolio.positions:    # 遍历当前投资组合中的每一只股票
+		if stock not in buy_stocks:      # 检查当前股票是否在买入列表中
+			log.info("[%s]不在应买入列表中" % (stock))      # 如果股票不在买入列表中，记录日志信息
+			position = context.portfolio.positions[stock]     # 获取当前股票的持仓信息
+			close_position(position)      # 卖出当前不在买入列表中的股票
+		else:
+			log.info("[%s]已经持有无需重复买入" % (stock))    # 如果股票已经在买入列表中，记录日志信息，表示无需重复买入
+	position_count = len(context.portfolio.positions)   # 获取当前投资组合中的股票数量
+	if g.stock_num > position_count:    # 检查目标持股数量是否大于当前持股数量
+		value = context.portfolio.cash / (g.stock_num - position_count)     # 计算每只股票应该分配的资金
+		for stock in buy_stocks:     # 遍历买入列表中的股票
+			if context.portfolio.positions[stock].total_amount == 0:      # 检查股票是否已经在投资组合中持有
+				if open_position(stock, value):     # 如果股票不在投资组合中，尝试买入股票
+					if len(context.portfolio.positions) == g.stock_num:# 如果成功买入股票，并且投资组合中的股票数量达到了目标数量，停止买入更多股票
+						break
+
+# 过滤停牌股票
+def filter_paused_stock(stock_list):
+	current_data = get_current_data()   # 获取当前所有股票的数据
+	return [stock for stock in stock_list if not current_data[stock].paused]   # 使用列表推导式，返回不在停牌状态的股票列表
+
+# 过滤ST及其他具有退市标签的股票
+def filter_st_stock(stock_list):
+	current_data = get_current_data()       # 获取当前所有股票的数据
+	return [stock for stock in stock_list   # 使用列表推导式，返回不是ST股且名称中不包含特定退市标签的股票列表
+			if not current_data[stock].is_st
+			and 'ST' not in current_data[stock].name
+			and '*' not in current_data[stock].name
+			and '退' not in current_data[stock].name]
+
+# 过滤涨停的股票
+def filter_limitup_stock(context, stock_list):
+	last_prices = history(1, unit='1m', field='close', security_list=stock_list)  # 获取最近一分钟的收盘价
+	current_data = get_current_data()  # 获取当前所有股票的数据
+	return [stock for stock in stock_list if stock in context.portfolio.positions.keys()  # 使用列表推导式，返回不在涨停状态或已持有的股票列表
+			or last_prices[stock][-1] < current_data[stock].high_limit]
+
+# 过滤跌停的股票
+def filter_limitdown_stock(context, stock_list):
+    last_prices = history(1, unit='1m', field='close', security_list=stock_list) # 获取最近一分钟的收盘价
+    current_data = get_current_data() # 获取当前所有股票的数据
+    return [stock for stock in stock_list if stock in context.portfolio.positions.keys() # 使用列表推导式，返回不在跌停状态或已持有的股票列表
+            or last_prices[stock][-1] > current_data[stock].low_limit]
+
+# 过滤科创股票
+def filter_kcb_stock(context, stock_list):
+    return [stock for stock in stock_list  if stock[0:3] != '688']
+
+# 过滤次新股
+def filter_new_stock(context,stock_list):
+    yesterday = context.previous_date  # 获取昨日日期
+    # 使用列表推导式，返回上市时间超过250日的股票列表
+    return [stock for stock in stock_list if not yesterday - get_security_info(stock).start_date < datetime.timedelta(days=250)]
+
+#4-1 判断今天是否为账户资金再平衡的日期
+def today_is_between(context, start_date, end_date):
+    today = context.current_dt.strftime('%m-%d')    # 获取当前日期，并格式化为月-日的形式，例如 '04-15' 表示 4月15日
+    return start_date <= today <= end_date # 判断当前日期是否在开始日期和结束日期之间（包含边界），返回一个布尔值，如果当前日期在范围内，则返回 True，否则返回 False
+
+#5-1 打印每日持仓信息
+def print_position_info(context):
+    #打印当天成交记录
+    trades = get_trades()  # 获取当天所有成交记录
+    for _trade in trades.values():  # 遍历成交记录字典的值（即成交记录对象）
+        print('成交记录：'+str(_trade))
+    #打印账户信息
+    for position in list(context.portfolio.positions.values()):  # 遍历账户中所有持仓的股票信息
+        securities=position.security  # 获取股票代码
+        cost=position.avg_cost        # 获取股票当前持仓成本
+        price=position.price          # 获取股票最新价
+        ret=100*(price/cost-1)        # 计算股票收益率
+        value=position.value          # 获取股票市值
+        amount=position.total_amount  # 获取股票持股数量
+        print('代码:{}'.format(securities))
+        print('成本价:{}'.format(format(cost,'.2f')))
+        print('现价:{}'.format(price))
+        print('收益率:{}%'.format(format(ret,'.2f')))
+        print('持仓(股):{}'.format(amount))
+        print('市值:{}'.format(format(value,'.2f')))
+        print('———————————————————————————————————')
+    print('———————————————————————————————————————分割线————————————————————————————————————————')
